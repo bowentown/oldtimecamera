@@ -37,7 +37,7 @@
 | 渲染 | OpenGL ES 2.0，`GL_TEXTURE_EXTERNAL_OES` + 一个通用片元着色器 |
 | 构建 | Gradle 8.9 + Android Gradle Plugin 8.7.3，JDK 17 |
 | 平台 | `minSdk 26` / `targetSdk 35` / `compileSdk 36` |
-| 依赖 | 仅 CameraX 四个模块，不引入图片加载、滤镜、统计、广告库 |
+| 依赖 | CameraX 1.3.4 + `androidx.activity`（提供 LifecycleOwner），不引入图片加载、滤镜、统计、广告库 |
 
 ## 3. 构建
 

@@ -1,7 +1,6 @@
 package com.bowentown.oldtimecamera;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Context;
@@ -31,6 +30,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
 import androidx.annotation.NonNull;
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.Camera;
@@ -52,7 +52,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** v1: one viewfinder, seven classic film stocks, one shutter button. */
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
 
     private static final int REQUEST_PERMISSIONS = 1001;
     private static final int MAX_PHOTO_EDGE = 2048;
