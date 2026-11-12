@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">旧时光相机</string>
+    <string name="shutter">快门</string>
+    <string name="switch_camera">切换镜头</string>
+    <string name="flash">闪光灯</string>
+    <string name="settings">设置</string>
+    <string name="thumbnail">最近一张</string>
+    <string name="camera_permission_needed">需要相机权限才能取景</string>
+    <string name="grant_permission">授予权限</string>
+    <string name="saved_to_gallery">已存入相册</string>
+    <string name="save_failed">保存失败</string>
+    <string name="capture_busy">正在冲洗上一张，请稍候</string>
+    <string name="settings_title">相纸设置</string>
+    <string name="date_stamp">日期水印</string>
+    <string name="paper_frame">相纸白边</string>
+    <string name="grain_boost">加强颗粒</string>
+    <string name="done">完成</string>
+    <string name="flash_auto">A</string>
+    <string name="flash_on">ON</string>
+    <string name="flash_off">OFF</string>
+</resources>

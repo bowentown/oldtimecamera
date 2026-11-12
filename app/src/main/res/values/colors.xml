@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="film_black">#141210</color>
+    <color name="film_dark">#1D1A17</color>
+    <color name="film_panel">#241F1A</color>
+    <color name="paper">#EFE7D6</color>
+    <color name="paper_dim">#A89E8B</color>
+    <color name="ink">#3A332B</color>
+    <color name="accent">#C8552F</color>
+    <color name="chip_selected">#EFE7D6</color>
+    <color name="chip_idle">#4A4137</color>
+    <color name="shutter_ring">#EFE7D6</color>
+    <color name="shutter_core">#E8DFCC</color>
+</resources>
