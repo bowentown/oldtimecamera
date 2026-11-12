@@ -15,6 +15,8 @@
     <string name="date_stamp">日期水印</string>
     <string name="paper_frame">相纸白边</string>
     <string name="grain_boost">加强颗粒</string>
+    <string name="rotate_viewfinder">取景旋转</string>
+    <string name="rotation_auto">自动</string>
     <string name="done">完成</string>
     <string name="flash_auto">A</string>
     <string name="flash_on">ON</string>

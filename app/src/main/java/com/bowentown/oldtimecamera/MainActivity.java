@@ -85,6 +85,12 @@ public class MainActivity extends ComponentActivity {
     private int exposures = 0;
     private Uri lastPhotoUri;
 
+    // Sensor orientation differs across devices. -1 follows CameraX; otherwise
+    // the user can force a rotation from the settings sheet.
+    private volatile int manualRotation = -1;
+    private volatile int autoDegrees = 90;
+    private volatile int bufferW = 4, bufferH = 3;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -211,6 +217,21 @@ public class MainActivity extends ComponentActivity {
         box.addView(frame);
         box.addView(grain);
 
+        TextView rotate = new TextView(this);
+        rotate.setText(rotationLabel());
+        rotate.setTextColor(getResources().getColor(R.color.paper, getTheme()));
+        rotate.setGravity(Gravity.CENTER);
+        rotate.setBackgroundResource(R.drawable.bg_chip);
+        rotate.setPadding(dp(8), dp(8), dp(8), dp(8));
+        LinearLayout.LayoutParams rotateLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(38));
+        rotateLp.setMargins(0, dp(8), 0, dp(4));
+        rotate.setOnClickListener(v -> {
+            cycleRotation();
+            rotate.setText(rotationLabel());
+        });
+        box.addView(rotate, rotateLp);
+
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.settings_title))
                 .setView(box)
@@ -231,6 +252,31 @@ public class MainActivity extends ComponentActivity {
         cb.setTextColor(getResources().getColor(R.color.paper, getTheme()));
         cb.setPadding(dp(4), dp(8), dp(4), dp(8));
         return cb;
+    }
+
+    private String rotationLabel() {
+        String value = manualRotation < 0
+                ? getString(R.string.rotation_auto)
+                : manualRotation + "°";
+        return getString(R.string.rotate_viewfinder) + " : " + value;
+    }
+
+    private void cycleRotation() {
+        if (manualRotation < 0) manualRotation = 0;
+        else if (manualRotation == 0) manualRotation = 90;
+        else if (manualRotation == 90) manualRotation = 180;
+        else if (manualRotation == 180) manualRotation = 270;
+        else manualRotation = -1;
+        applyTransform(autoDegrees, facingFront);
+    }
+
+    private void applyTransform(int cameraDegrees, boolean mirrored) {
+        autoDegrees = cameraDegrees;
+        int degrees = manualRotation >= 0 ? manualRotation : cameraDegrees;
+        boolean quarterTurn = (degrees % 180 != 0);
+        previewView.setCameraTransform(degrees, mirrored);
+        previewView.setAspectRatio(quarterTurn ? bufferH : bufferW,
+                quarterTurn ? bufferW : bufferH);
     }
 
     // ------------------------------------------------------------------ permissions
@@ -314,13 +360,14 @@ public class MainActivity extends ComponentActivity {
         int w = size.getWidth();
         int h = size.getHeight();
         st.setDefaultBufferSize(w, h);
+        bufferW = w;
+        bufferH = h;
 
-        request.setTransformationInfoListener(cameraExecutor, info -> {
-            int degrees = info.getRotationDegrees();
-            boolean quarterTurn = (degrees % 180 != 0);
-            previewView.setCameraTransform(degrees, facingFront);
-            previewView.setAspectRatio(quarterTurn ? h : w, quarterTurn ? w : h);
-        });
+        // A landscape buffer in a portrait activity is the common case. Apply
+        // a usable default immediately; TransformationInfo refines it shortly.
+        applyTransform(90, facingFront);
+        request.setTransformationInfoListener(cameraExecutor,
+                info -> applyTransform(info.getRotationDegrees(), facingFront));
 
         Surface surface = new Surface(st);
         request.provideSurface(surface, cameraExecutor, result -> surface.release());
