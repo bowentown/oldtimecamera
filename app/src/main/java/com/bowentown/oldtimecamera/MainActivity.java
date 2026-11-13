@@ -1,6 +1,7 @@
 package com.bowentown.oldtimecamera;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -815,6 +816,9 @@ public class MainActivity extends ComponentActivity {
         }, ContextCompat.getMainExecutor(this));
     }
 
+    // CameraX 1.3.4 marks TransformationInfo#hasCameraTransform() and #getMirroring() @RestrictTo(LIBRARY_GROUP)
+    // until CameraX 1.4.
+    @SuppressLint("RestrictedApi")
     private void provideSurface(SurfaceRequest request, SurfaceTexture st, boolean lensFront, int gen) {
         Size size = request.getResolution();
         int w = size.getWidth();
@@ -846,7 +850,7 @@ public class MainActivity extends ComponentActivity {
             if (gen != bindGeneration.get()) return;
             latestHasCameraTransform = info.hasCameraTransform();
             latestInfoRotation = info.getRotationDegrees();
-            latestInfoMirroring = info.isMirroring();
+            latestInfoMirroring = info.getMirroring();
             Rect crop = info.getCropRect();
             if (crop != null && bufferW > 0 && bufferH > 0 && !crop.isEmpty()) {
                 latestCropL = (float) crop.left / bufferW;

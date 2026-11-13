@@ -56,7 +56,7 @@ public class CameraTransformMathTest {
 
     @Test
     public void frontPortrait_hasCameraTransform_trueDoesNotDoubleFlipOrInvertY() {
-        // Reproduces the v1.1.1 bug scenario: front camera sensorOrientation=270, info.isMirroring=true.
+        // Reproduces the v1.1.1 bug scenario: front camera sensorOrientation=270, info.getMirroring()=true.
         // In v1.1.1, applying rotMatrix(270, mirror=true) * stFront inverted the vertical Y axis.
         float[] stFront = syntheticHwSurfaceTextureMatrix(270, true);
 
