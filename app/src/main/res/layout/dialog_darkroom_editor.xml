@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/editorRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/film_black"
+    android:orientation="vertical">
+
+    <!-- Top bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
+
+        <ImageButton
+            android:id="@+id/editorClose"
+            style="@style/TopIconButton"
+            android:contentDescription="@string/cancel"
+            android:src="@drawable/ic_back" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="serif"
+            android:gravity="center"
+            android:letterSpacing="0.16"
+            android:text="@string/editor_title"
+            android:textColor="@color/paper"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/editorSave"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_segment_active"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="@string/editor_save"
+            android:textColor="@color/ink"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Preview image -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="18dp">
+
+        <ImageView
+            android:id="@+id/editorPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter" />
+
+        <TextView
+            android:id="@+id/editorBusy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_hud_bar"
+            android:fontFamily="monospace"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:text="@string/editor_developing"
+            android:textColor="@color/paper"
+            android:textSize="11sp"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- Note input + film selector -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/film_dark"
+        android:orientation="vertical"
+        android:paddingTop="12dp"
+        android:paddingBottom="18dp">
+
+        <EditText
+            android:id="@+id/editorNoteInput"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/bg_segment_container"
+            android:fontFamily="monospace"
+            android:hint="@string/editor_note_hint"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:maxLength="36"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:textColor="@color/paper"
+            android:textColorHint="@color/paper_muted"
+            android:textSize="11.5sp" />
+
+        <HorizontalScrollView
+            android:id="@+id/editorFilmScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/editorChipContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+        </HorizontalScrollView>
+    </LinearLayout>
+</LinearLayout>

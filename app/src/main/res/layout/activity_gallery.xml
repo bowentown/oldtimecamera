@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/galleryRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/film_black">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Top archive bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
+
+            <ImageButton
+                android:id="@+id/galleryBack"
+                style="@style/TopIconButton"
+                android:contentDescription="@string/cancel"
+                android:src="@drawable/ic_back" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="serif"
+                    android:letterSpacing="0.16"
+                    android:text="@string/gallery_title"
+                    android:textColor="@color/paper"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/gallerySubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.1"
+                    android:textColor="@color/paper_dim"
+                    android:textSize="9.5sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/gallerySheetToggle"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_chip"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="@string/gallery_contact_sheet"
+                android:textColor="@color/paper"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <!-- Contact sheet instruction / export bar -->
+        <LinearLayout
+            android:id="@+id/sheetSelectBar"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:background="@color/film_dark"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:text="@string/gallery_select_hint"
+                android:textColor="@color/paper_dim"
+                android:textSize="10.5sp" />
+
+            <TextView
+                android:id="@+id/makeSheetButton"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:background="@drawable/bg_segment_active"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textColor="@color/ink"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Photo grid -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <GridView
+                android:id="@+id/galleryGrid"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:horizontalSpacing="4dp"
+                android:numColumns="3"
+                android:padding="6dp"
+                android:verticalSpacing="4dp" />
+
+            <TextView
+                android:id="@+id/galleryEmpty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:lineSpacingExtra="6dp"
+                android:padding="32dp"
+                android:text="@string/gallery_empty"
+                android:textColor="@color/paper_dim"
+                android:textSize="12sp"
+                android:visibility="gone" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- Full-screen Lightbox Viewer -->
+    <FrameLayout
+        android:id="@+id/lightboxOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#F511100E"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/lightboxImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingStart="16dp"
+            android:paddingTop="68dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="88dp"
+            android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_gravity="top"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
+
+            <ImageButton
+                android:id="@+id/lightboxClose"
+                style="@style/TopIconButton"
+                android:contentDescription="@string/cancel"
+                android:src="@drawable/ic_back" />
+
+            <TextView
+                android:id="@+id/lightboxTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:textColor="@color/paper_dim"
+                android:textSize="11sp" />
+
+            <Space
+                android:layout_width="38dp"
+                android:layout_height="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="46dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/bg_hud_bar"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
+
+            <LinearLayout
+                android:id="@+id/lightboxShare"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="14dp">
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:src="@drawable/ic_share" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:fontFamily="monospace"
+                    android:text="@string/gallery_share"
+                    android:textColor="@color/paper"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="16dp"
+                android:background="@color/hairline" />
+
+            <LinearLayout
+                android:id="@+id/lightboxDelete"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingEnd="8dp">
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:src="@drawable/ic_delete" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:fontFamily="monospace"
+                    android:text="@string/gallery_delete"
+                    android:textColor="@color/paper_dim"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+
+</FrameLayout>

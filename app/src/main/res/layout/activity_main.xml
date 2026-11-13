@@ -5,51 +5,57 @@
     android:layout_height="match_parent"
     android:background="@color/film_black">
 
-    <!-- Live camera preview with the film shader applied on every frame. -->
-    <com.bowentown.oldtimecamera.FilmCameraView
-        android:id="@+id/preview"
+    <LinearLayout
+        android:id="@+id/mainColumn"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="center" />
-
-    <!-- Dim scrim behind the controls so the UI stays readable. -->
-    <View
-        android:id="@+id/topScrim"
-        android:layout_width="match_parent"
-        android:layout_height="96dp"
-        android:layout_gravity="top"
-        android:background="#66000000" />
-
-    <View
-        android:id="@+id/bottomScrim"
-        android:layout_width="match_parent"
-        android:layout_height="210dp"
-        android:layout_gravity="bottom"
-        android:background="#99000000" />
-
-    <!-- ============ TOP BAR ============ -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
         android:orientation="vertical">
 
-        <com.bowentown.oldtimecamera.PerforationView
-            android:layout_width="match_parent"
-            android:layout_height="12dp" />
-
+        <!-- ============ TOP BAR ============ -->
         <LinearLayout
+            android:id="@+id/topBar"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="56dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp">
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp">
 
-            <TextView
+            <ImageButton
                 android:id="@+id/flashButton"
-                style="@style/TopButton"
-                android:text="@string/flash_auto" />
+                style="@style/TopIconButton"
+                android:contentDescription="@string/flash"
+                android:src="@drawable/ic_flash_auto" />
+
+            <Space
+                android:layout_width="8dp"
+                android:layout_height="1dp" />
+
+            <FrameLayout
+                android:id="@+id/timerButton"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/bg_round_button"
+                android:contentDescription="@string/hud_timer_off">
+
+                <ImageView
+                    android:id="@+id/timerIcon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_timer" />
+
+                <TextView
+                    android:id="@+id/timerLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:textColor="@color/amber_led"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </FrameLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -62,8 +68,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:fontFamily="serif"
-                    android:letterSpacing="0.18"
-                    android:text="OLD TIME CAMERA"
+                    android:letterSpacing="0.22"
+                    android:text="@string/brand_title"
                     android:textColor="@color/paper"
                     android:textSize="13sp" />
 
@@ -71,138 +77,287 @@
                     android:id="@+id/rollCounter"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
                     android:fontFamily="monospace"
-                    android:letterSpacing="0.1"
-                    android:text="ROLL 01 · EXP 00"
+                    android:letterSpacing="0.12"
+                    android:text="R01 · 00 / 36"
                     android:textColor="@color/paper_dim"
-                    android:textSize="9sp" />
+                    android:textSize="9.5sp" />
             </LinearLayout>
 
-            <TextView
+            <ImageButton
                 android:id="@+id/switchButton"
-                style="@style/TopButton"
-                android:text="SW" />
+                style="@style/TopIconButton"
+                android:contentDescription="@string/switch_camera"
+                android:src="@drawable/ic_flip_camera" />
 
             <Space
                 android:layout_width="8dp"
                 android:layout_height="1dp" />
 
-            <TextView
+            <ImageButton
                 android:id="@+id/settingsButton"
-                style="@style/TopButton"
-                android:text="SET" />
+                style="@style/TopIconButton"
+                android:contentDescription="@string/settings"
+                android:src="@drawable/ic_settings" />
         </LinearLayout>
-    </LinearLayout>
 
-    <!-- In-viewfinder stamp preview (the real stamp is baked into the saved JPEG). -->
-    <TextView
-        android:id="@+id/dateStamp"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="18dp"
-        android:layout_marginBottom="222dp"
-        android:alpha="0.85"
-        android:fontFamily="monospace"
-        android:letterSpacing="0.08"
-        android:shadowColor="#99000000"
-        android:shadowDx="1"
-        android:shadowDy="1"
-        android:shadowRadius="2"
-        android:textColor="#F2A65A"
-        android:textSize="13sp" />
-
-    <!-- ============ BOTTOM PANEL ============ -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="vertical">
-
-        <com.bowentown.oldtimecamera.PerforationView
+        <!-- ============ VIEWFINDER STAGE ============ -->
+        <FrameLayout
+            android:id="@+id/viewfinderStage"
             android:layout_width="match_parent"
-            android:layout_height="12dp" />
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
-        <TextView
-            android:id="@+id/presetCaption"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:paddingTop="8dp"
-            android:fontFamily="monospace"
-            android:letterSpacing="0.12"
-            android:textColor="@color/paper_dim"
-            android:textSize="10sp"
-            android:text="FILM STOCK" />
-
-        <HorizontalScrollView
-            android:id="@+id/filmStripScroll"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:fillViewport="true"
-            android:overScrollMode="never"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/chipContainer"
+            <FrameLayout
+                android:id="@+id/previewHost"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_gravity="center">
+
+                <com.bowentown.oldtimecamera.FilmCameraView
+                    android:id="@+id/preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
+
+                <com.bowentown.oldtimecamera.ViewfinderOverlayView
+                    android:id="@+id/viewfinderOverlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
+
+                <TextView
+                    android:id="@+id/dateStamp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginEnd="14dp"
+                    android:layout_marginBottom="12dp"
+                    android:alpha="0.88"
+                    android:fontFamily="monospace"
+                    android:letterSpacing="0.10"
+                    android:shadowColor="#AA000000"
+                    android:shadowDx="0"
+                    android:shadowDy="1"
+                    android:shadowRadius="3"
+                    android:textColor="@color/amber_led"
+                    android:textSize="13sp" />
+            </FrameLayout>
+
+            <!-- Self-timer countdown overlay -->
+            <TextView
+                android:id="@+id/countdownText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:fontFamily="serif"
+                android:shadowColor="#CC000000"
+                android:shadowRadius="12"
+                android:textColor="@color/paper"
+                android:textSize="64sp"
+                android:visibility="gone" />
+
+            <!-- Optional EV slider drawer floating unobtrusively at bottom of stage -->
+            <LinearLayout
+                android:id="@+id/evPanel"
+                android:layout_width="240dp"
+                android:layout_height="36dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="10dp"
+                android:background="@drawable/bg_hud_bar"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="12dp"
-                android:paddingEnd="12dp" />
-        </HorizontalScrollView>
+                android:paddingEnd="12dp"
+                android:visibility="gone">
 
-        <!-- Shutter row -->
-        <FrameLayout
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="EV"
+                    android:textColor="@color/paper_dim"
+                    android:textSize="10sp" />
+
+                <SeekBar
+                    android:id="@+id/evSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:progressTint="@color/amber_led"
+                    android:thumbTint="@color/paper" />
+
+                <TextView
+                    android:id="@+id/evValueText"
+                    android:layout_width="38dp"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:gravity="end"
+                    android:text="0.0"
+                    android:textColor="@color/amber_led"
+                    android:textSize="10sp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- ============ BOTTOM CAMERA CHASSIS ============ -->
+        <LinearLayout
+            android:id="@+id/bottomDeck"
             android:layout_width="match_parent"
-            android:layout_height="112dp"
-            android:paddingStart="26dp"
-            android:paddingEnd="26dp">
+            android:layout_height="wrap_content"
+            android:background="@color/film_black"
+            android:orientation="vertical"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp">
 
-            <FrameLayout
-                android:id="@+id/thumbnailFrame"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_gravity="start|center_vertical"
-                android:background="@drawable/bg_thumb"
-                android:contentDescription="@string/thumbnail">
+            <!-- Micro HUD capsule bar -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_gravity="center_horizontal"
+                android:background="@drawable/bg_hud_bar"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp">
 
-                <ImageView
-                    android:id="@+id/thumbnail"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="centerCrop" />
-            </FrameLayout>
-
-            <FrameLayout
-                android:id="@+id/shutterButton"
-                android:layout_width="78dp"
-                android:layout_height="78dp"
-                android:layout_gravity="center"
-                android:background="@drawable/bg_shutter_ring"
-                android:contentDescription="@string/shutter">
+                <TextView
+                    android:id="@+id/zoomPill"
+                    style="@style/HudPill"
+                    android:text="1.0x" />
 
                 <View
-                    android:id="@+id/shutterCore"
-                    android:layout_width="60dp"
-                    android:layout_height="60dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_shutter_core" />
-            </FrameLayout>
+                    android:layout_width="1dp"
+                    android:layout_height="12dp"
+                    android:background="@color/hairline" />
 
+                <TextView
+                    android:id="@+id/aspectPill"
+                    style="@style/HudPill"
+                    android:text="3:4" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="12dp"
+                    android:background="@color/hairline" />
+
+                <TextView
+                    android:id="@+id/evPill"
+                    style="@style/HudPill"
+                    android:text="EV 0" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="12dp"
+                    android:background="@color/hairline" />
+
+                <ImageButton
+                    android:id="@+id/gridPill"
+                    android:layout_width="32dp"
+                    android:layout_height="26dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/hud_grid"
+                    android:padding="5dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_grid" />
+            </LinearLayout>
+
+            <!-- Active film caption -->
             <TextView
-                android:id="@+id/frameCounter"
-                android:layout_width="wrap_content"
+                android:id="@+id/presetCaption"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_gravity="end|center_vertical"
+                android:layout_marginTop="8dp"
                 android:fontFamily="monospace"
+                android:gravity="center"
                 android:letterSpacing="0.08"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:singleLine="true"
+                android:ellipsize="end"
                 android:textColor="@color/paper_dim"
-                android:textSize="11sp"
-                android:text="00 / 36" />
-        </FrameLayout>
+                android:textSize="10sp" />
+
+            <!-- Film stock strip -->
+            <HorizontalScrollView
+                android:id="@+id/filmStripScroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:clipToPadding="false"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/chipContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp" />
+            </HorizontalScrollView>
+
+            <!-- Shutter deck -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="96dp"
+                android:layout_marginTop="4dp"
+                android:paddingStart="28dp"
+                android:paddingEnd="28dp">
+
+                <FrameLayout
+                    android:id="@+id/thumbnailFrame"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:background="@drawable/bg_thumb"
+                    android:clipToOutline="true"
+                    android:contentDescription="@string/thumbnail"
+                    android:padding="2dp">
+
+                    <ImageView
+                        android:id="@+id/thumbPlaceholder"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_film_roll" />
+
+                    <ImageView
+                        android:id="@+id/thumbnail"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="centerCrop" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/shutterButton"
+                    android:layout_width="76dp"
+                    android:layout_height="76dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_shutter_ring"
+                    android:contentDescription="@string/shutter">
+
+                    <View
+                        android:id="@+id/shutterCore"
+                        android:layout_width="60dp"
+                        android:layout_height="60dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/bg_shutter_core" />
+                </FrameLayout>
+
+                <ImageButton
+                    android:id="@+id/importButton"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:background="@drawable/bg_square_button"
+                    android:contentDescription="@string/darkroom_import"
+                    android:padding="11dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_darkroom_import" />
+            </FrameLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Shutter flash overlay -->
@@ -220,28 +375,35 @@
         android:id="@+id/permissionGate"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:alpha="0.96"
         android:background="@color/film_black"
         android:clickable="true"
         android:focusable="true"
         android:gravity="center"
         android:orientation="vertical"
+        android:padding="32dp"
         android:visibility="gone">
+
+        <ImageView
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:src="@drawable/ic_launcher_foreground" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
             android:fontFamily="serif"
+            android:letterSpacing="0.1"
             android:text="@string/app_name"
             android:textColor="@color/paper"
-            android:textSize="24sp" />
+            android:textSize="22sp" />
 
         <TextView
-            android:layout_width="260dp"
+            android:layout_width="250dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:gravity="center"
-            android:lineSpacingExtra="6dp"
+            android:lineSpacingExtra="5dp"
             android:text="@string/camera_permission_needed"
             android:textColor="@color/paper_dim"
             android:textSize="13sp" />
@@ -249,14 +411,18 @@
         <TextView
             android:id="@+id/grantButton"
             android:layout_width="wrap_content"
-            android:layout_height="44dp"
-            android:layout_marginTop="26dp"
-            android:background="@drawable/bg_chip"
+            android:layout_height="42dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_segment_active"
+            android:fontFamily="monospace"
             android:gravity="center"
-            android:paddingStart="26dp"
-            android:paddingEnd="26dp"
+            android:letterSpacing="0.08"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
             android:text="@string/grant_permission"
-            android:textColor="@color/paper" />
+            android:textColor="@color/ink"
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
 </FrameLayout>

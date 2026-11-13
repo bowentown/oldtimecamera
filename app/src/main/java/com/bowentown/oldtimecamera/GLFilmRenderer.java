@@ -20,20 +20,30 @@ import javax.microedition.khronos.opengles.GL10;
 
 /**
  * Renders the CameraX preview through one film shader, and renders captured
- * JPEGs through the *same* shader off-screen so the saved photo matches what
- * the viewfinder showed.
+ * JPEGs (and imported darkroom photos) through the *same* shader off-screen
+ * so the saved print matches the live viewfinder.
  */
 final class GLFilmRenderer implements GLSurfaceView.Renderer,
         SurfaceTexture.OnFrameAvailableListener {
+
+    private static final String PRECISION_HEADER = String.join("\n",
+            "#ifdef GL_FRAGMENT_PRECISION_HIGH",
+            "precision highp float;",
+            "#else",
+            "precision mediump float;",
+            "#endif"
+    );
 
     private static final String VERTEX_SHADER = String.join("\n",
             "attribute vec4 aPosition;",
             "attribute vec2 aTexCoord;",
             "uniform mat4 uTexMatrix;",
             "varying vec2 vTexCoord;",
+            "varying vec2 vScreenUv;",
             "void main() {",
             "    gl_Position = aPosition;",
             "    vTexCoord = (uTexMatrix * vec4(aTexCoord, 0.0, 1.0)).xy;",
+            "    vScreenUv = aPosition.xy * 0.5 + 0.5;",
             "}"
     );
 
@@ -50,60 +60,75 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "uniform float uHalation;",
             "uniform float uGrayscale;",
             "uniform vec3 uLeakColor;",
+            "uniform float uLeakSeed;",
+            "uniform vec2 uFrameScale;",
             "uniform float uTime;",
             "uniform vec2 uResolution;"
     );
 
     private static final String FILM_BODY = String.join("\n",
-            "vec3 filmColor(vec3 src, vec2 uv) {",
+            "float filmHash(vec2 p) {",
+            "    vec2 q = mod(p, 512.0);",
+            "    return fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453);",
+            "}",
+            "vec3 filmColor(vec3 src, vec2 screenUv) {",
+            "    vec2 frameUv = (screenUv - 0.5) / max(uFrameScale, vec2(0.01)) + 0.5;",
+            "    vec2 uv = clamp(frameUv, 0.0, 1.0);",
             "    vec3 c = clamp(uColorMatrix * src + uColorOffset, 0.0, 1.0);",
             "    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));",
             "    c = mix(vec3(lum), c, uSaturation);",
-            "    c = (c - 0.5) * uContrast + 0.5 + uBrightness;",
-            // Lifted blacks and compressed whites, the signature of a faded negative.
+            "    c = clamp((c - 0.5) * uContrast + 0.5 + uBrightness, 0.0, 1.0);",
+            "    vec3 sCurve = c * c * (3.0 - 2.0 * c);",
+            "    c = mix(c, sCurve, 0.16);",
             "    c = c * (1.0 - uFade * 0.16) + vec3(uFade * 0.085);",
             "    if (uGrayscale > 0.5) {",
             "        float g = dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114));",
             "        c = vec3(g) * vec3(1.015, 1.0, 0.975);",
             "    }",
-            // Warm bloom around near-clipped highlights.
             "    float hi = smoothstep(0.72, 1.0, dot(clamp(c, 0.0, 1.0), vec3(0.3333)));",
             "    c += vec3(0.115, 0.030, 0.004) * hi * uHalation;",
-            // Light leak creeping in from the left edge of the frame.
-            "    float d = distance(uv, vec2(-0.06, 0.82));",
-            "    float leakMask = exp(-d * d * 5.0) * uLeak;",
+            "    float leakY = mix(0.24, 0.84, fract(uLeakSeed));",
+            "    float leakX = uLeakSeed > 0.5 ? 1.06 : -0.06;",
+            "    float d = distance(uv, vec2(leakX, leakY));",
+            "    float leakMask = exp(-d * d * 4.8) * uLeak;",
             "    c += uLeakColor * leakMask * 0.62;",
             "    vec2 p = uv - 0.5;",
-            "    c *= clamp(1.0 - uVignette * dot(p, p) * 1.75, 0.0, 1.0);",
-            "    float n = fract(sin(dot(uv * uResolution + vec2(uTime * 37.0, uTime * 17.0),",
-            "            vec2(12.9898, 78.233))) * 43758.5453);",
-            "    c += vec3(n - 0.5) * uGrain;",
+            "    float aspect = (uResolution.x * uFrameScale.x) / max(uResolution.y * uFrameScale.y, 1.0);",
+            "    p.x *= mix(1.0, aspect, 0.45);",
+            "    c *= clamp(1.0 - uVignette * dot(p, p) * 1.65, 0.0, 1.0);",
+            "    vec2 px = uv * (uResolution * uFrameScale);",
+            "    float fine = filmHash(px + vec2(uTime * 37.0, uTime * 17.0));",
+            "    float coarse = filmHash(floor(px * 0.5) + vec2(uTime * 19.0, uTime * 43.0));",
+            "    float grain = (fine * 0.65 + coarse * 0.35) - 0.5;",
+            "    c += vec3(grain) * uGrain;",
             "    return clamp(c, 0.0, 1.0);",
             "}"
     );
 
     private static final String PREVIEW_FRAGMENT = String.join("\n",
             "#extension GL_OES_EGL_image_external : require",
-            "precision mediump float;",
+            PRECISION_HEADER,
             "varying vec2 vTexCoord;",
+            "varying vec2 vScreenUv;",
             "uniform samplerExternalOES uTexture;",
             FILM_UNIFORMS,
             FILM_BODY,
             "void main() {",
             "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
-            "    gl_FragColor = vec4(filmColor(src, vTexCoord), 1.0);",
+            "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
 
     private static final String PHOTO_FRAGMENT = String.join("\n",
-            "precision mediump float;",
+            PRECISION_HEADER,
             "varying vec2 vTexCoord;",
+            "varying vec2 vScreenUv;",
             "uniform sampler2D uTexture;",
             FILM_UNIFORMS,
             FILM_BODY,
             "void main() {",
             "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
-            "    gl_FragColor = vec4(filmColor(src, vTexCoord), 1.0);",
+            "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
 
@@ -113,14 +138,12 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             -1f,  1f,
              1f,  1f
     };
-    /** Camera textures rely on SurfaceTexture.getTransformMatrix for the flip. */
     private static final float[] TEX_CAMERA = {
             0f, 0f,
             1f, 0f,
             0f, 1f,
             1f, 1f
     };
-    /** Bitmap uploads are top-row-first, so v=0 is the top of the picture. */
     private static final float[] TEX_PHOTO = {
             0f, 1f,
             1f, 1f,
@@ -131,7 +154,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private static final class Locs {
         int position, texCoord, texMatrix;
         int texture, colorMatrix, colorOffset, saturation, contrast, brightness;
-        int fade, grain, vignette, leak, halation, grayscale, leakColor, time, resolution;
+        int fade, grain, vignette, leak, halation, grayscale, leakColor;
+        int leakSeed, frameScale, time, resolution;
 
         static Locs of(int program) {
             Locs l = new Locs();
@@ -151,6 +175,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             l.halation = uniform(program, "uHalation");
             l.grayscale = uniform(program, "uGrayscale");
             l.leakColor = uniform(program, "uLeakColor");
+            l.leakSeed = uniform(program, "uLeakSeed");
+            l.frameScale = uniform(program, "uFrameScale");
             l.time = uniform(program, "uTime");
             l.resolution = uniform(program, "uResolution");
             return l;
@@ -180,6 +206,10 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private volatile boolean mirror = false;
     private volatile FilmPreset preset;
     private volatile boolean grainBoost = false;
+    private volatile boolean lightLeakEnabled = true;
+    private volatile float leakSeed = 0.28f;
+    private volatile float frameScaleX = 1f;
+    private volatile float frameScaleY = 1f;
 
     GLFilmRenderer(FilmCameraView view, FilmPreset initialPreset) {
         this.view = view;
@@ -194,7 +224,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
         GLES20.glDisable(GLES20.GL_BLEND);
-        GLES20.glClearColor(0.078f, 0.071f, 0.063f, 1f);
+        GLES20.glClearColor(0.067f, 0.063f, 0.055f, 1f);
 
         oesTextureId = createOesTexture();
         surfaceTexture = new SurfaceTexture(oesTextureId);
@@ -239,7 +269,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
         GLES20.glUseProgram(previewProgram);
-        applyUniforms(previewLocs, viewportW, viewportH);
+        FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
+        applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, leakSeed,
+                frameScaleX, frameScaleY, viewportW, viewportH);
         GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
         drawQuad(previewLocs, cameraTexBuffer);
     }
@@ -267,6 +299,22 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         view.requestRender();
     }
 
+    void setLightLeakEnabled(boolean enabled) {
+        lightLeakEnabled = enabled;
+        view.requestRender();
+    }
+
+    void setLeakSeed(float seed) {
+        leakSeed = seed;
+        view.requestRender();
+    }
+
+    void setFrameScale(float scaleX, float scaleY) {
+        frameScaleX = Math.max(0.1f, scaleX);
+        frameScaleY = Math.max(0.1f, scaleY);
+        view.requestRender();
+    }
+
     SurfaceTexture surfaceTexture() {
         return surfaceTexture;
     }
@@ -278,9 +326,10 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     /**
      * Runs on the GL thread (via postTask). Reuses the preview shader on the
-     * full-resolution capture, renders to an FBO and reads the pixels back.
+     * cropped capture or imported bitmap, renders to an FBO and reads pixels back.
      */
-    Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain) {
+    Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
+                       boolean leakEnabled, float seed) {
         int w = source.getWidth();
         int h = source.getHeight();
 
@@ -300,6 +349,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
                 GLES20.GL_TEXTURE_2D, tex[0], 0);
         int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
         if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            GLES20.glDeleteFramebuffers(1, fbo, 0);
+            GLES20.glDeleteTextures(1, tex, 0);
             throw new RuntimeException("Incomplete framebuffer: 0x" + Integer.toHexString(status));
         }
 
@@ -307,7 +359,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUseProgram(photoProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
-        applyUniformsFor(photoLocs, p, boostGrain, w, h);
+        applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h);
         GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
         drawQuad(photoLocs, photoTexBuffer);
 
@@ -321,9 +373,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         pixels.get(srcPixels);
         int[] argb = new int[w * h];
         for (int y = 0; y < h; y++) {
-            int row = (h - 1 - y) * w; // glReadPixels is bottom-up
+            int row = (h - 1 - y) * w;
             for (int x = 0; x < w; x++) {
-                int c = srcPixels[row + x]; // little-endian: 0xAABBGGRR
+                int c = srcPixels[row + x];
                 int r = c & 0xFF;
                 int g = (c >>> 8) & 0xFF;
                 int b = (c >>> 16) & 0xFF;
@@ -341,13 +393,10 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     // ---------------------------------------------------------------- internals
 
-    private void applyUniforms(Locs l, int w, int h) {
-        FilmPreset p = preset;
-        if (p == null) p = FilmPresets.all()[0];
-        applyUniformsFor(l, p, grainBoost, w, h);
-    }
-
-    private static void applyUniformsFor(Locs l, FilmPreset p, boolean boostGrain, int w, int h) {
+    private static void applyUniformsFor(Locs l, FilmPreset p, boolean boostGrain,
+                                         boolean leakEnabled, float seed,
+                                         float frameScaleX, float frameScaleY,
+                                         int w, int h) {
         GLES20.glUniform1i(l.texture, 0);
         GLES20.glUniformMatrix3fv(l.colorMatrix, 1, false, p.colorMatrix, 0);
         GLES20.glUniform3f(l.colorOffset, p.colorOffset[0], p.colorOffset[1], p.colorOffset[2]);
@@ -357,10 +406,12 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUniform1f(l.fade, p.fade);
         GLES20.glUniform1f(l.grain, p.grain * (boostGrain ? 1.7f : 1f));
         GLES20.glUniform1f(l.vignette, p.vignette);
-        GLES20.glUniform1f(l.leak, p.leak);
+        GLES20.glUniform1f(l.leak, leakEnabled ? p.leak : 0f);
         GLES20.glUniform1f(l.halation, p.halation);
         GLES20.glUniform1f(l.grayscale, p.grayscale ? 1f : 0f);
         GLES20.glUniform3f(l.leakColor, p.leakColor[0], p.leakColor[1], p.leakColor[2]);
+        GLES20.glUniform1f(l.leakSeed, seed);
+        GLES20.glUniform2f(l.frameScale, frameScaleX, frameScaleY);
         GLES20.glUniform1f(l.time, (System.nanoTime() % 1_000_000_000L) / 1_000_000_000f);
         GLES20.glUniform2f(l.resolution, w, h);
     }

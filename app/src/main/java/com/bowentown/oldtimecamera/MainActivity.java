@@ -1,45 +1,52 @@
 package com.bowentown.oldtimecamera;
 
 import android.Manifest;
-import android.app.AlertDialog;
-import android.content.ContentValues;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
-import android.graphics.Typeface;
 import android.media.ExifInterface;
+import android.media.MediaActionSound;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CountDownTimer;
+import android.util.Range;
 import android.util.Size;
-import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ExposureState;
+import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory;
 import androidx.camera.core.SurfaceRequest;
+import androidx.camera.core.ZoomState;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 
@@ -48,48 +55,77 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
-/** v1: one viewfinder, seven classic film stocks, one shutter button. */
+/**
+ * Main viewfinder activity: CameraX preview & capture, unified OpenGL ES film
+ * emulation, tactile shutter, darkroom controls, and gallery import/archive.
+ */
 public class MainActivity extends ComponentActivity {
 
     private static final int REQUEST_PERMISSIONS = 1001;
     private static final int MAX_PHOTO_EDGE = 2048;
 
-    private FilmCameraView previewView;
+    private CameraPrefs prefs;
     private FilmPreset[] presets;
-    private final List<TextView> chips = new ArrayList<>();
-    private int currentPreset = 1;
+    private final List<LinearLayout> chips = new ArrayList<>();
 
-    private TextView caption, rollCounter, frameCounter, dateStampPreview;
-    private TextView flashButton;
+    private FilmCameraView previewView;
+    private ViewfinderOverlayView viewfinderOverlay;
+    private TextView caption, rollCounter, dateStampPreview, countdownText;
+    private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
+    private ImageButton flashButton, gridPill;
+    private ImageView timerIcon, thumbnail, thumbPlaceholder;
     private HorizontalScrollView filmStripScroll;
-    private LinearLayout chipContainer;
-    private FrameLayout shutterButton;
+    private LinearLayout chipContainer, evPanel;
+    private SeekBar evSeekBar;
+    private FrameLayout shutterButton, thumbnailFrame;
     private View shutterCore, flashOverlay, permissionGate;
-    private ImageView thumbnail;
-    private FrameLayout thumbnailFrame;
 
     private final ExecutorService cameraExecutor = Executors.newSingleThreadExecutor();
     private ProcessCameraProvider cameraProvider;
     private Camera camera;
     private ImageCapture imageCapture;
+    private MediaActionSound shutterSound;
 
+    private int currentPreset = 1;
     private boolean facingFront = false;
     private int flashMode = ImageCapture.FLASH_MODE_AUTO;
-    private boolean dateStamp = true;
-    private boolean paperFrame = true;
+    private CameraPrefs.AspectRatio aspectRatio = CameraPrefs.AspectRatio.RATIO_3_4;
+    private CameraPrefs.PaperStyle paperStyle = CameraPrefs.PaperStyle.IVORY;
+    private CameraPrefs.DateMode dateMode = CameraPrefs.DateMode.TODAY;
     private boolean grainBoost = false;
-    private boolean capturing = false;
+    private boolean lightLeakEnabled = true;
+    private boolean gridEnabled = false;
+    private boolean shutterSoundEnabled = true;
+    private boolean frontMirrorEnabled = true;
+    private int timerSeconds = 0;
+    private int rollNumber = 1;
     private int exposures = 0;
-    private Uri lastPhotoUri;
+    private float leakSeed = 0.28f;
+
+    private boolean capturing = false;
+    private CountDownTimer activeTimer;
+    private float currentZoom = 1f;
+    private int evMin = 0, evMax = 0;
+    private float evStep = 0.333f;
 
     // Sensor orientation differs across devices. -1 follows CameraX; otherwise
-    // the user can force a rotation from the settings sheet.
+    // the user can force a rotation from the darkroom settings sheet.
     private volatile int manualRotation = -1;
     private volatile int autoDegrees = 90;
     private volatile int bufferW = 4, bufferH = 3;
+
+    private final ActivityResultLauncher<String> pickPhotoLauncher =
+            registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+                if (uri != null) {
+                    DarkroomEditorDialog.show(this, previewView, prefs, uri, currentPreset,
+                            (savedUri, thumb) -> onExternalPrintSaved(savedUri, thumb));
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -97,24 +133,66 @@ public class MainActivity extends ComponentActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
+        prefs = new CameraPrefs(this);
         presets = FilmPresets.all();
+        loadPrefs();
+
         bindViews();
-        buildFilmStrip();
+        FilmUiHelper.applySystemBarPadding(findViewById(R.id.mainColumn));
+        FilmUiHelper.buildFilmStrip(this, filmStripScroll, chipContainer, presets, chips, idx -> {
+            shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            applyPreset(idx);
+        });
         wireControls();
+
+        shutterSound = new MediaActionSound();
+        cameraExecutor.execute(() -> shutterSound.load(MediaActionSound.SHUTTER_CLICK));
+
         applyPreset(currentPreset);
+        applyAspectRatio(false);
+        updateGridUi();
+        updateTimerUi();
         updateStampPreview();
+        updateRollCounter();
+        refreshThumbnailAsync();
         ensurePermissions();
+    }
+
+    private void loadPrefs() {
+        currentPreset = FilmPresets.indexOfId(prefs.getPresetId("portra400"));
+        aspectRatio = prefs.getAspectRatio();
+        paperStyle = prefs.getPaperStyle();
+        dateMode = prefs.getDateMode();
+        grainBoost = prefs.isGrainBoost();
+        lightLeakEnabled = prefs.isLightLeakEnabled();
+        gridEnabled = prefs.isGridEnabled();
+        shutterSoundEnabled = prefs.isShutterSoundEnabled();
+        frontMirrorEnabled = prefs.isFrontMirrorEnabled();
+        timerSeconds = prefs.getTimerSeconds();
+        manualRotation = prefs.getManualRotation();
+        rollNumber = prefs.getRollNumber();
+        exposures = prefs.getExposures();
     }
 
     // ------------------------------------------------------------------ view setup
 
     private void bindViews() {
         previewView = findViewById(R.id.preview);
+        viewfinderOverlay = findViewById(R.id.viewfinderOverlay);
         caption = findViewById(R.id.presetCaption);
         rollCounter = findViewById(R.id.rollCounter);
-        frameCounter = findViewById(R.id.frameCounter);
         dateStampPreview = findViewById(R.id.dateStamp);
+        countdownText = findViewById(R.id.countdownText);
         flashButton = findViewById(R.id.flashButton);
+        timerIcon = findViewById(R.id.timerIcon);
+        timerLabel = findViewById(R.id.timerLabel);
+        zoomPill = findViewById(R.id.zoomPill);
+        aspectPill = findViewById(R.id.aspectPill);
+        evPill = findViewById(R.id.evPill);
+        evPanel = findViewById(R.id.evPanel);
+        evSeekBar = findViewById(R.id.evSeekBar);
+        evValueText = findViewById(R.id.evValueText);
+        gridPill = findViewById(R.id.gridPill);
         filmStripScroll = findViewById(R.id.filmStripScroll);
         chipContainer = findViewById(R.id.chipContainer);
         shutterButton = findViewById(R.id.shutterButton);
@@ -122,143 +200,239 @@ public class MainActivity extends ComponentActivity {
         flashOverlay = findViewById(R.id.flashOverlay);
         permissionGate = findViewById(R.id.permissionGate);
         thumbnail = findViewById(R.id.thumbnail);
+        thumbPlaceholder = findViewById(R.id.thumbPlaceholder);
         thumbnailFrame = findViewById(R.id.thumbnailFrame);
-    }
-
-    private void buildFilmStrip() {
-        for (int i = 0; i < presets.length; i++) {
-            TextView chip = new TextView(this);
-            chip.setText(presets[i].name);
-            chip.setTag(i);
-            chip.setTypeface(Typeface.MONOSPACE);
-            chip.setTextSize(10f);
-            chip.setGravity(Gravity.CENTER);
-            chip.setSingleLine(true);
-            chip.setPadding(dp(12), 0, dp(12), 0);
-            chip.setBackgroundResource(R.drawable.bg_chip);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(34));
-            lp.setMargins(dp(4), 0, dp(4), 0);
-            int index = i;
-            chip.setOnClickListener(v -> {
-                applyPreset(index);
-                filmStripScroll.smoothScrollTo(chip.getLeft() - dp(100), 0);
-            });
-            chipContainer.addView(chip, lp);
-            chips.add(chip);
-        }
     }
 
     private void wireControls() {
         shutterButton.setOnClickListener(v -> takePhoto());
         flashButton.setOnClickListener(v -> cycleFlash());
-        findViewById(R.id.switchButton).setOnClickListener(v -> {
-            facingFront = !facingFront;
-            SurfaceTexture st = previewView.getSurfaceTexture();
-            if (st != null) bindCamera(st);
-        });
-        findViewById(R.id.settingsButton).setOnClickListener(v -> showSettings());
+        findViewById(R.id.timerButton).setOnClickListener(v -> cycleTimer());
+        findViewById(R.id.switchButton).setOnClickListener(v -> switchLens());
+        findViewById(R.id.settingsButton).setOnClickListener(v -> openDarkroomSheet());
         findViewById(R.id.grantButton).setOnClickListener(v -> ensurePermissions());
-        thumbnailFrame.setOnClickListener(v -> openLastPhoto());
+
+        thumbnailFrame.setOnClickListener(v ->
+                startActivity(new Intent(this, GalleryActivity.class)));
+        findViewById(R.id.importButton).setOnClickListener(v ->
+                pickPhotoLauncher.launch("image/*"));
+
+        aspectPill.setOnClickListener(v -> {
+            aspectRatio = aspectRatio.next();
+            prefs.setAspectRatio(aspectRatio);
+            applyAspectRatio(true);
+        });
+
+        zoomPill.setOnClickListener(v -> cycleZoom());
+
+        evPill.setOnClickListener(v ->
+                evPanel.setVisibility(evPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+
+        gridPill.setOnClickListener(v -> {
+            gridEnabled = !gridEnabled;
+            prefs.setGridEnabled(gridEnabled);
+            updateGridUi();
+        });
+
+        evSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && camera != null && evMax > evMin) {
+                    int idx = evMin + progress;
+                    camera.getCameraControl().setExposureCompensationIndex(idx);
+                    updateEvUi(idx);
+                }
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        viewfinderOverlay.setOnFrameBoundsListener((rect, vw, vh) -> {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dateStampPreview.getLayoutParams();
+            lp.rightMargin = Math.max(0, Math.round(vw - rect.right)) + FilmUiHelper.dp(this, 14);
+            lp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 12);
+            dateStampPreview.setLayoutParams(lp);
+        });
+
+        previewView.setOnGestureListener(new FilmCameraView.OnGestureListener() {
+            @Override
+            public void onTapFocus(float viewX, float viewY, int viewWidth, int viewHeight) {
+                triggerTapFocus(viewX, viewY, viewWidth, viewHeight);
+            }
+
+            @Override
+            public void onPinchZoom(float scaleFactor) {
+                applyPinchZoom(scaleFactor);
+            }
+        });
     }
 
-    // ------------------------------------------------------------------ film stocks
+    // ------------------------------------------------------------------ film & UI state
 
     private void applyPreset(int index) {
         currentPreset = index;
         FilmPreset p = presets[index];
+        prefs.setPresetId(p.id);
+
         previewView.setPreset(p);
         previewView.setGrainBoost(grainBoost);
-        // Each stock ships with its own recommended print pairing.
-        dateStamp = p.suggestStamp;
-        paperFrame = p.suggestFrame;
-        caption.setText(p.note);
-        dateStampPreview.setText(PhotoSaver.dateString());
-        updateStampPreview();
-        for (int i = 0; i < chips.size(); i++) {
-            boolean selected = i == index;
-            TextView chip = chips.get(i);
-            chip.setBackgroundTintList(ColorStateList.valueOf(
-                    selected ? getResources().getColor(R.color.chip_selected, getTheme())
-                            : getResources().getColor(R.color.chip_idle, getTheme())));
-            chip.setTextColor(selected ? getResources().getColor(R.color.ink, getTheme())
-                    : getResources().getColor(R.color.paper, getTheme()));
-            chip.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.MONOSPACE);
-        }
+        previewView.setLightLeakEnabled(lightLeakEnabled);
+        previewView.setLeakSeed(leakSeed);
+
+        caption.setText(String.format(Locale.US, "%s  ·  %s", p.name, p.shortNote));
+        FilmUiHelper.updateChipSelection(this, chips, index);
+        FilmUiHelper.centerChip(filmStripScroll, chips.get(index));
+    }
+
+    private void applyAspectRatio(boolean animate) {
+        aspectPill.setText(aspectRatio.label);
+        float sensor = previewView.getSensorAspectRatio();
+        float target = aspectRatio.widthOverHeight;
+        float scaleX = target < sensor ? target / sensor : 1f;
+        float scaleY = target > sensor ? sensor / target : 1f;
+        previewView.setFrameScale(scaleX, scaleY);
+        viewfinderOverlay.setFrameScale(scaleX, scaleY, animate);
     }
 
     private void updateStampPreview() {
-        dateStampPreview.setVisibility(dateStamp ? View.VISIBLE : View.GONE);
+        String text = PhotoSaver.dateString(dateMode);
+        if (text.isEmpty()) {
+            dateStampPreview.setVisibility(View.GONE);
+        } else {
+            dateStampPreview.setText(text);
+            dateStampPreview.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void updateGridUi() {
+        viewfinderOverlay.setGridEnabled(gridEnabled);
+        gridPill.setColorFilter(getResources().getColor(
+                gridEnabled ? R.color.amber_led : R.color.paper, getTheme()));
+    }
+
+    private void updateTimerUi() {
+        if (timerSeconds > 0) {
+            timerIcon.setVisibility(View.GONE);
+            timerLabel.setVisibility(View.VISIBLE);
+            timerLabel.setText(timerSeconds + "s");
+        } else {
+            timerIcon.setVisibility(View.VISIBLE);
+            timerLabel.setVisibility(View.GONE);
+        }
+    }
+
+    private void updateRollCounter() {
+        int frameInRoll = Math.min(exposures, CameraPrefs.FRAMES_PER_ROLL);
+        rollCounter.setText(String.format(Locale.US,
+                "R%02d · %02d / %02d", rollNumber, frameInRoll, CameraPrefs.FRAMES_PER_ROLL));
+    }
+
+    private void cycleTimer() {
+        if (timerSeconds == 0) timerSeconds = 3;
+        else if (timerSeconds == 3) timerSeconds = 10;
+        else timerSeconds = 0;
+        prefs.setTimerSeconds(timerSeconds);
+        updateTimerUi();
     }
 
     private void cycleFlash() {
         if (flashMode == ImageCapture.FLASH_MODE_AUTO) {
             flashMode = ImageCapture.FLASH_MODE_ON;
-            flashButton.setText(getString(R.string.flash_on));
+            flashButton.setImageResource(R.drawable.ic_flash_on);
         } else if (flashMode == ImageCapture.FLASH_MODE_ON) {
             flashMode = ImageCapture.FLASH_MODE_OFF;
-            flashButton.setText(getString(R.string.flash_off));
+            flashButton.setImageResource(R.drawable.ic_flash_off);
         } else {
             flashMode = ImageCapture.FLASH_MODE_AUTO;
-            flashButton.setText(getString(R.string.flash_auto));
+            flashButton.setImageResource(R.drawable.ic_flash_auto);
         }
         if (imageCapture != null) imageCapture.setFlashMode(flashMode);
     }
 
-    private void showSettings() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(18), dp(24), dp(8));
-
-        CheckBox stamp = checkBox(getString(R.string.date_stamp), dateStamp);
-        CheckBox frame = checkBox(getString(R.string.paper_frame), paperFrame);
-        CheckBox grain = checkBox(getString(R.string.grain_boost), grainBoost);
-        box.addView(stamp);
-        box.addView(frame);
-        box.addView(grain);
-
-        TextView rotate = new TextView(this);
-        rotate.setText(rotationLabel());
-        rotate.setTextColor(getResources().getColor(R.color.paper, getTheme()));
-        rotate.setGravity(Gravity.CENTER);
-        rotate.setBackgroundResource(R.drawable.bg_chip);
-        rotate.setPadding(dp(8), dp(8), dp(8), dp(8));
-        LinearLayout.LayoutParams rotateLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(38));
-        rotateLp.setMargins(0, dp(8), 0, dp(4));
-        rotate.setOnClickListener(v -> {
-            cycleRotation();
-            rotate.setText(rotationLabel());
-        });
-        box.addView(rotate, rotateLp);
-
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.settings_title))
-                .setView(box)
-                .setPositiveButton(getString(R.string.done), (d, w) -> {
-                    dateStamp = stamp.isChecked();
-                    paperFrame = frame.isChecked();
-                    grainBoost = grain.isChecked();
-                    previewView.setGrainBoost(grainBoost);
-                    updateStampPreview();
-                })
-                .show();
+    private void switchLens() {
+        facingFront = !facingFront;
+        SurfaceTexture st = previewView.getSurfaceTexture();
+        if (st != null) bindCamera(st);
     }
 
-    private CheckBox checkBox(String label, boolean checked) {
-        CheckBox cb = new CheckBox(this);
-        cb.setText(label);
-        cb.setChecked(checked);
-        cb.setTextColor(getResources().getColor(R.color.paper, getTheme()));
-        cb.setPadding(dp(4), dp(8), dp(4), dp(8));
-        return cb;
+    private void openDarkroomSheet() {
+        DarkroomSheet.show(this, prefs, new DarkroomSheet.Callbacks() {
+            @Override
+            public void onAspectChanged(CameraPrefs.AspectRatio ratio) {
+                aspectRatio = ratio;
+                applyAspectRatio(true);
+            }
+
+            @Override
+            public void onPaperChanged(CameraPrefs.PaperStyle style) {
+                paperStyle = style;
+            }
+
+            @Override
+            public void onDateModeChanged(CameraPrefs.DateMode mode) {
+                dateMode = mode;
+                updateStampPreview();
+            }
+
+            @Override
+            public void onGrainBoostChanged(boolean enabled) {
+                grainBoost = enabled;
+                previewView.setGrainBoost(enabled);
+            }
+
+            @Override
+            public void onLightLeakChanged(boolean enabled) {
+                lightLeakEnabled = enabled;
+                previewView.setLightLeakEnabled(enabled);
+            }
+
+            @Override
+            public void onGridChanged(boolean enabled) {
+                gridEnabled = enabled;
+                updateGridUi();
+            }
+
+            @Override
+            public void onShutterSoundChanged(boolean enabled) {
+                shutterSoundEnabled = enabled;
+            }
+
+            @Override
+            public void onFrontMirrorChanged(boolean enabled) {
+                frontMirrorEnabled = enabled;
+            }
+
+            @Override
+            public int onCycleRotation() {
+                cycleRotation();
+                return manualRotation;
+            }
+
+            @Override
+            public String getRotationLabel() {
+                return rotationLabel();
+            }
+
+            @Override
+            public void onLoadNewRoll() {
+                rollNumber++;
+                exposures = 0;
+                prefs.setRollNumber(rollNumber);
+                prefs.setExposures(0);
+                updateRollCounter();
+                Toast.makeText(MainActivity.this,
+                        getString(R.string.new_roll_loaded, rollNumber - 1, rollNumber),
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private String rotationLabel() {
         String value = manualRotation < 0
                 ? getString(R.string.rotation_auto)
                 : manualRotation + "°";
-        return getString(R.string.rotate_viewfinder) + " : " + value;
+        return getString(R.string.rotate_viewfinder) + " · " + value;
     }
 
     private void cycleRotation() {
@@ -267,6 +441,7 @@ public class MainActivity extends ComponentActivity {
         else if (manualRotation == 90) manualRotation = 180;
         else if (manualRotation == 180) manualRotation = 270;
         else manualRotation = -1;
+        prefs.setManualRotation(manualRotation);
         applyTransform(autoDegrees, facingFront);
     }
 
@@ -277,6 +452,86 @@ public class MainActivity extends ComponentActivity {
         previewView.setCameraTransform(degrees, mirrored);
         previewView.setAspectRatio(quarterTurn ? bufferH : bufferW,
                 quarterTurn ? bufferW : bufferH);
+        previewView.post(() -> applyAspectRatio(false));
+    }
+
+    // ------------------------------------------------------------------ focus, zoom, EV
+
+    private void triggerTapFocus(float viewX, float viewY, int vw, int vh) {
+        viewfinderOverlay.showFocusAt(viewX, viewY);
+        viewfinderOverlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        if (camera == null) return;
+        MeteringPoint point = new SurfaceOrientedMeteringPointFactory(vw, vh)
+                .createPoint(viewX, viewY);
+        FocusMeteringAction action = new FocusMeteringAction.Builder(point)
+                .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                .build();
+        camera.getCameraControl().startFocusAndMetering(action);
+    }
+
+    private void applyPinchZoom(float scaleFactor) {
+        if (camera == null) return;
+        ZoomState zs = camera.getCameraInfo().getZoomState().getValue();
+        float minZ = zs != null ? zs.getMinZoomRatio() : 1f;
+        float maxZ = zs != null ? Math.min(zs.getMaxZoomRatio(), 6f) : 4f;
+        currentZoom = Math.max(minZ, Math.min(maxZ, currentZoom * scaleFactor));
+        camera.getCameraControl().setZoomRatio(currentZoom);
+        updateZoomUi();
+    }
+
+    private void cycleZoom() {
+        if (camera == null) return;
+        ZoomState zs = camera.getCameraInfo().getZoomState().getValue();
+        float maxZ = zs != null ? zs.getMaxZoomRatio() : 2f;
+        if (currentZoom < 1.35f && maxZ >= 1.5f) {
+            currentZoom = 1.5f;
+        } else if (currentZoom < 1.85f && maxZ >= 2.0f) {
+            currentZoom = 2.0f;
+        } else {
+            currentZoom = 1.0f;
+        }
+        camera.getCameraControl().setZoomRatio(currentZoom);
+        updateZoomUi();
+    }
+
+    private void updateZoomUi() {
+        zoomPill.setText(String.format(Locale.US, "%.1fx", currentZoom));
+    }
+
+    private void setupCameraControlsUi() {
+        if (camera == null) return;
+        currentZoom = 1f;
+        updateZoomUi();
+
+        ExposureState es = camera.getCameraInfo().getExposureState();
+        if (es.isExposureCompensationSupported()) {
+            Range<Integer> range = es.getExposureCompensationRange();
+            evMin = range.getLower();
+            evMax = range.getUpper();
+            evStep = es.getExposureCompensationStep().floatValue();
+            evSeekBar.setMax(Math.max(1, evMax - evMin));
+            int currentIdx = es.getExposureCompensationIndex();
+            evSeekBar.setProgress(Math.max(0, currentIdx - evMin));
+            updateEvUi(currentIdx);
+            evPill.setVisibility(View.VISIBLE);
+        } else {
+            evPill.setVisibility(View.GONE);
+            evPanel.setVisibility(View.GONE);
+        }
+    }
+
+    private void updateEvUi(int index) {
+        float ev = index * evStep;
+        if (Math.abs(ev) < 0.05f) {
+            evPill.setText("EV 0");
+            evPill.setTextColor(getResources().getColor(R.color.paper, getTheme()));
+            evValueText.setText("0.0");
+        } else {
+            String formatted = String.format(Locale.US, "%+.1f", ev);
+            evPill.setText("EV " + formatted);
+            evPill.setTextColor(getResources().getColor(R.color.amber_led, getTheme()));
+            evValueText.setText(formatted);
+        }
     }
 
     // ------------------------------------------------------------------ permissions
@@ -347,6 +602,7 @@ public class MainActivity extends ComponentActivity {
                 cameraProvider.unbindAll();
                 camera = cameraProvider.bindToLifecycle(this, selector, preview, imageCapture);
                 imageCapture.setFlashMode(flashMode);
+                setupCameraControlsUi();
                 preview.setSurfaceProvider(cameraExecutor, request -> provideSurface(request, st));
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(this,
@@ -363,8 +619,6 @@ public class MainActivity extends ComponentActivity {
         bufferW = w;
         bufferH = h;
 
-        // A landscape buffer in a portrait activity is the common case. Apply
-        // a usable default immediately; TransformationInfo refines it shortly.
         applyTransform(90, facingFront);
         request.setTransformationInfoListener(cameraExecutor,
                 info -> applyTransform(info.getRotationDegrees(), facingFront));
@@ -376,6 +630,10 @@ public class MainActivity extends ComponentActivity {
     // ------------------------------------------------------------------ shutter
 
     private void takePhoto() {
+        if (activeTimer != null) {
+            cancelCountdown();
+            return;
+        }
         if (capturing) {
             toast(R.string.capture_busy);
             return;
@@ -384,19 +642,73 @@ public class MainActivity extends ComponentActivity {
             toast(R.string.camera_permission_needed);
             return;
         }
+        if (timerSeconds > 0) {
+            startCountdown(timerSeconds);
+            return;
+        }
+        captureNow();
+    }
+
+    private void startCountdown(int seconds) {
+        countdownText.setVisibility(View.VISIBLE);
+        activeTimer = new CountDownTimer(seconds * 1000L, 1000L) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                int sec = (int) Math.ceil(millisUntilFinished / 1000.0);
+                countdownText.setText(String.valueOf(sec));
+                countdownText.setScaleX(1.25f);
+                countdownText.setScaleY(1.25f);
+                countdownText.setAlpha(0.95f);
+                countdownText.animate().scaleX(1f).scaleY(1f).alpha(0.75f).setDuration(750).start();
+                shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            }
+
+            @Override
+            public void onFinish() {
+                activeTimer = null;
+                countdownText.setVisibility(View.GONE);
+                captureNow();
+            }
+        }.start();
+    }
+
+    private void cancelCountdown() {
+        if (activeTimer != null) {
+            activeTimer.cancel();
+            activeTimer = null;
+        }
+        countdownText.setVisibility(View.GONE);
+    }
+
+    private void captureNow() {
+        if (capturing || imageCapture == null) return;
         capturing = true;
+
+        shutterButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        if (shutterSoundEnabled && shutterSound != null) {
+            try {
+                shutterSound.play(MediaActionSound.SHUTTER_CLICK);
+            } catch (Exception ignored) {
+            }
+        }
+
         shutterCore.animate().scaleX(0.84f).scaleY(0.84f).setDuration(80)
                 .withEndAction(() -> shutterCore.animate().scaleX(1f).scaleY(1f)
                         .setDuration(160).start()).start();
         flashOverlay.setAlpha(0f);
-        flashOverlay.animate().alpha(0.8f).setDuration(55)
+        flashOverlay.animate().alpha(0.78f).setDuration(55)
                 .withEndAction(() -> flashOverlay.animate().alpha(0f).setDuration(240).start())
                 .start();
 
-        FilmPreset preset = presets[currentPreset];
-        final boolean wantStamp = dateStamp;
-        final boolean wantFrame = paperFrame;
+        final FilmPreset preset = presets[currentPreset];
+        final CameraPrefs.AspectRatio shotAspect = aspectRatio;
+        final CameraPrefs.PaperStyle shotPaper = paperStyle;
+        final CameraPrefs.DateMode shotDate = dateMode;
         final boolean boostGrain = grainBoost;
+        final boolean useLeak = lightLeakEnabled;
+        final float shotLeakSeed = leakSeed;
+        final boolean mirrorSelfie = facingFront && frontMirrorEnabled;
+        final int nextFrame = (exposures % CameraPrefs.FRAMES_PER_ROLL) + 1;
 
         imageCapture.takePicture(cameraExecutor, new ImageCapture.OnImageCapturedCallback() {
             @Override
@@ -409,15 +721,24 @@ public class MainActivity extends ComponentActivity {
                     Bitmap source = decode(jpeg, MAX_PHOTO_EDGE);
                     if (source == null) throw new IllegalStateException("Cannot decode capture");
                     Bitmap rotated = rotate(source, rotation);
-                    Bitmap filtered = previewView.renderPhoto(rotated, preset, boostGrain);
-                    if (filtered != rotated) rotated.recycle();
-                    Bitmap print = PhotoSaver.applyPaper(filtered, preset, wantStamp, wantFrame);
+                    if (mirrorSelfie) {
+                        rotated = PhotoSaver.flipHorizontal(rotated);
+                    }
+                    Bitmap cropped = PhotoSaver.cropToAspect(rotated, shotAspect);
+                    Bitmap filtered = previewView.renderPhoto(
+                            cropped, preset, boostGrain, useLeak, shotLeakSeed);
+                    if (filtered != cropped) cropped.recycle();
+
+                    Bitmap print = PhotoSaver.applyPaper(
+                            filtered, preset, shotPaper, shotDate, shotAspect, nextFrame, null);
                     if (print != filtered) filtered.recycle();
-                    lastPhotoUri = PhotoSaver.save(MainActivity.this, print);
-                    Bitmap thumb = Bitmap.createScaledBitmap(print, dp(96), dp(96), true);
+
+                    Uri savedUri = PhotoSaver.save(MainActivity.this, print);
+                    int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
+                    Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
                     print.recycle();
 
-                    runOnUiThread(() -> onPhotoSaved(thumb));
+                    runOnUiThread(() -> onPhotoSaved(savedUri, thumb));
                 } catch (Exception e) {
                     runOnUiThread(() -> {
                         toast(R.string.save_failed);
@@ -440,27 +761,75 @@ public class MainActivity extends ComponentActivity {
         });
     }
 
-    private void onPhotoSaved(Bitmap thumb) {
-        thumbnail.setImageBitmap(thumb);
-        exposures++;
-        frameCounter.setText(String.format(java.util.Locale.US,
-                "%02d / 36", Math.min(exposures, 36)));
-        rollCounter.setText(String.format(java.util.Locale.US,
-                "ROLL %02d · EXP %02d", (exposures / 36) + 1, exposures % 36));
-        capturing = false;
+    private void onPhotoSaved(Uri savedUri, Bitmap thumb) {
+        advanceRollAndThumbnail(savedUri, thumb);
+        // Advance the organic leak seed for the next exposure so consecutive
+        // shots on the roll get subtle edge variation while staying WYSIWYG.
+        leakSeed = (leakSeed + 0.37f) % 1.0f;
+        previewView.setLeakSeed(leakSeed);
         toast(R.string.saved_to_gallery);
     }
 
-    private void openLastPhoto() {
-        if (lastPhotoUri == null) return;
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(lastPhotoUri, "image/jpeg");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(intent, getString(R.string.thumbnail)));
-        } catch (Exception ignored) {
-            // No gallery app available; the photo is still in MediaStore.
+    private void onExternalPrintSaved(Uri savedUri, Bitmap thumb) {
+        advanceRollAndThumbnail(savedUri, thumb);
+    }
+
+    private void advanceRollAndThumbnail(Uri savedUri, Bitmap thumb) {
+        prefs.setLastPhotoUri(savedUri);
+        setThumbnailBitmap(thumb);
+
+        exposures++;
+        if (exposures >= CameraPrefs.FRAMES_PER_ROLL) {
+            int finishedRoll = rollNumber;
+            rollNumber++;
+            exposures = 0;
+            prefs.setRollNumber(rollNumber);
+            Toast.makeText(this,
+                    getString(R.string.new_roll_loaded, finishedRoll, rollNumber),
+                    Toast.LENGTH_LONG).show();
         }
+        prefs.setExposures(exposures);
+        updateRollCounter();
+        capturing = false;
+    }
+
+    private void setThumbnailBitmap(Bitmap thumb) {
+        if (thumb != null) {
+            thumbnail.setImageBitmap(thumb);
+            thumbPlaceholder.setVisibility(View.GONE);
+        } else {
+            thumbnail.setImageDrawable(null);
+            thumbPlaceholder.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void refreshThumbnailAsync() {
+        cameraExecutor.execute(() -> {
+            Uri target = prefs.getLastPhotoUri();
+            Bitmap bmp = target != null ? PhotoSaver.decodeScaledUri(this, target, 192) : null;
+            if (bmp == null) {
+                List<PhotoSaver.PhotoItem> list = PhotoSaver.loadAlbumPhotos(this);
+                if (!list.isEmpty()) {
+                    target = list.get(0).uri;
+                    prefs.setLastPhotoUri(target);
+                    bmp = PhotoSaver.decodeScaledUri(this, target, 192);
+                } else {
+                    prefs.setLastPhotoUri(null);
+                }
+            }
+            Bitmap finalBmp = bmp;
+            runOnUiThread(() -> setThumbnailBitmap(finalBmp));
+        });
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+                && permissionGate.getVisibility() != View.VISIBLE) {
+            takePhoto();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     // ------------------------------------------------------------------ bitmap helpers
@@ -507,24 +876,22 @@ public class MainActivity extends ComponentActivity {
         return out;
     }
 
-    // ------------------------------------------------------------------ misc
+    // ------------------------------------------------------------------ lifecycle
 
     private void toast(int resId) {
         Toast.makeText(this, resId, Toast.LENGTH_SHORT).show();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         previewView.onResume();
+        refreshThumbnailAsync();
     }
 
     @Override
     protected void onPause() {
+        cancelCountdown();
         previewView.onPause();
         super.onPause();
     }
@@ -532,6 +899,12 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        cancelCountdown();
+        MediaActionSound sound = shutterSound;
+        shutterSound = null;
+        if (sound != null) {
+            cameraExecutor.execute(sound::release);
+        }
         cameraExecutor.shutdown();
         if (cameraProvider != null) cameraProvider.unbindAll();
     }

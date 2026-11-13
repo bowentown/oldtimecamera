@@ -6,14 +6,14 @@ package com.bowentown.oldtimecamera;
  * A "preset" is deliberately not just a colour grade: grain, halation, light
  * leak and vignette are part of the same recipe, so switching film stocks
  * changes the whole character of the frame rather than just its tint.
- * The paper/ink colours describe how this stock is paired with a print border
- * and a date stamp when the JPEG is written.
  */
 public final class FilmPreset {
 
     public final String id;
     public final String name;
+    public final String isoTag;
     public final String note;
+    public final String shortNote;
     public final int swatch;
 
     /** 3x3 colour transform in column-major order (ready for glUniformMatrix3fv). */
@@ -38,7 +38,9 @@ public final class FilmPreset {
     private FilmPreset(Builder b) {
         this.id = b.id;
         this.name = b.name;
+        this.isoTag = b.isoTag;
         this.note = b.note;
+        this.shortNote = b.shortNote.isEmpty() ? b.note : b.shortNote;
         this.swatch = b.swatch;
         this.colorMatrix = toColumnMajor(b.matrix);
         this.colorOffset = b.offset;
@@ -73,7 +75,9 @@ public final class FilmPreset {
     public static final class Builder {
         String id = "stock";
         String name = "FILM";
+        String isoTag = "400";
         String note = "";
+        String shortNote = "";
         int swatch = 0xFF8C7A5C;
         float[] matrix = {1, 0, 0, 0, 1, 0, 0, 0, 1};
         float[] offset = {0, 0, 0};
@@ -93,7 +97,9 @@ public final class FilmPreset {
 
         public Builder id(String v) { id = v; return this; }
         public Builder name(String v) { name = v; return this; }
+        public Builder isoTag(String v) { isoTag = v; return this; }
         public Builder note(String v) { note = v; return this; }
+        public Builder shortNote(String v) { shortNote = v; return this; }
         public Builder swatch(int v) { swatch = v; return this; }
         /** row-major 3x3 */
         public Builder matrix(float... v) { matrix = v; return this; }

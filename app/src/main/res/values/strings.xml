@@ -1,24 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">旧时光相机</string>
+    <string name="brand_title">OLD TIME</string>
     <string name="shutter">快门</string>
     <string name="switch_camera">切换镜头</string>
     <string name="flash">闪光灯</string>
-    <string name="settings">设置</string>
-    <string name="thumbnail">最近一张</string>
-    <string name="camera_permission_needed">需要相机权限才能取景</string>
-    <string name="grant_permission">授予权限</string>
-    <string name="saved_to_gallery">已存入相册</string>
+    <string name="settings">暗房设置</string>
+    <string name="thumbnail">胶卷相册</string>
+    <string name="darkroom_import">导入照片冲洗</string>
+    <string name="camera_permission_needed">需要相机权限才能打开取景器</string>
+    <string name="grant_permission">开启相机</string>
+    <string name="saved_to_gallery">已存入旧时光相册</string>
     <string name="save_failed">保存失败</string>
-    <string name="capture_busy">正在冲洗上一张，请稍候</string>
-    <string name="settings_title">相纸设置</string>
-    <string name="date_stamp">日期水印</string>
-    <string name="paper_frame">相纸白边</string>
-    <string name="grain_boost">加强颗粒</string>
+    <string name="capture_busy">正在显影上一格，请稍候</string>
+    <string name="new_roll_loaded">第 %1$02d 卷已拍完 · 已装入第 %2$02d 卷</string>
+
+    <string name="hud_grid">网格</string>
+    <string name="hud_timer_off">定时</string>
+
+    <string name="sheet_title">暗房调校</string>
+    <string name="sheet_aspect">取景画幅</string>
+    <string name="sheet_paper">相纸样式</string>
+    <string name="sheet_date">日期背印</string>
+    <string name="sheet_options">成像质感</string>
+    <string name="sheet_calibration">硬件校准</string>
+
+    <string name="paper_ivory">暖白相纸</string>
+    <string name="paper_black">黑胶底片</string>
+    <string name="paper_none">无边框</string>
+
+    <string name="date_today">今日日期</string>
+    <string name="date_retro">\'98 时光机</string>
+    <string name="date_off">关闭</string>
+
+    <string name="grain_boost">加强银盐颗粒</string>
+    <string name="light_leak">胶片随机漏光</string>
+    <string name="grid_overlay">三分构图网格</string>
+    <string name="shutter_sound">机械快门声</string>
+    <string name="front_mirror">自拍镜像保存</string>
+
     <string name="rotate_viewfinder">取景旋转</string>
     <string name="rotation_auto">自动</string>
+    <string name="load_new_roll">装入新胶卷</string>
     <string name="done">完成</string>
-    <string name="flash_auto">A</string>
+
+    <string name="flash_auto">AUTO</string>
     <string name="flash_on">ON</string>
     <string name="flash_off">OFF</string>
+
+    <string name="editor_title">暗房冲印</string>
+    <string name="editor_note_hint">写下一句注记（可选，将印于相纸下沿）</string>
+    <string name="editor_save">洗出照片</string>
+    <string name="editor_developing">正在暗房冲洗…</string>
+    <string name="editor_load_failed">无法读取选中的图片</string>
+
+    <string name="gallery_title">胶卷底片库</string>
+    <string name="gallery_empty">尚未拍下第一格瞬间\n回到取景器按下快门，或从相册导入照片</string>
+    <string name="gallery_frames">%1$d 格底片</string>
+    <string name="gallery_contact_sheet">联系表</string>
+    <string name="gallery_select_hint">选择 2–9 张生成 35mm 胶片联系表</string>
+    <string name="gallery_make_sheet">生成联系表 (%1$d)</string>
+    <string name="gallery_sheet_saved">35mm 联系表已存入相册</string>
+    <string name="gallery_share">分享</string>
+    <string name="gallery_delete">删除</string>
+    <string name="gallery_delete_confirm">从设备相册中删除这张胶片？</string>
+    <string name="gallery_deleted">已删除</string>
+    <string name="cancel">取消</string>
 </resources>
