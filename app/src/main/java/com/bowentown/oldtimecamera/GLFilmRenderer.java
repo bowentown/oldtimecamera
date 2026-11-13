@@ -79,28 +79,34 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "    c = mix(vec3(lum), c, uSaturation);",
             "    c = clamp((c - 0.5) * uContrast + 0.5 + uBrightness, 0.0, 1.0);",
             "    vec3 sCurve = c * c * (3.0 - 2.0 * c);",
-            "    c = mix(c, sCurve, 0.16);",
-            "    c = c * (1.0 - uFade * 0.16) + vec3(uFade * 0.085);",
+            "    c = mix(c, sCurve, 0.22);",
+            "    c = c * (1.0 - uFade * 0.11) + vec3(uFade * 0.052) * (1.0 - c * 0.6);",
             "    if (uGrayscale > 0.5) {",
             "        float g = dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114));",
-            "        c = vec3(g) * vec3(1.015, 1.0, 0.975);",
+            "        c = vec3(g) * vec3(1.012, 1.0, 0.980);",
             "    }",
-            "    float hi = smoothstep(0.72, 1.0, dot(clamp(c, 0.0, 1.0), vec3(0.3333)));",
-            "    c += vec3(0.115, 0.030, 0.004) * hi * uHalation;",
+            "    float peak = dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114));",
+            "    float hi = smoothstep(0.86, 1.0, peak);",
+            "    c += vec3(0.085, 0.022, 0.004) * (hi * hi) * uHalation;",
             "    float leakY = mix(0.24, 0.84, fract(uLeakSeed));",
             "    float leakX = uLeakSeed > 0.5 ? 1.06 : -0.06;",
             "    float d = distance(uv, vec2(leakX, leakY));",
-            "    float leakMask = exp(-d * d * 4.8) * uLeak;",
-            "    c += uLeakColor * leakMask * 0.62;",
+            "    float leakMask = exp(-d * d * 5.2) * uLeak;",
+            "    c += uLeakColor * leakMask * 0.52;",
             "    vec2 p = uv - 0.5;",
             "    float aspect = (uResolution.x * uFrameScale.x) / max(uResolution.y * uFrameScale.y, 1.0);",
             "    p.x *= mix(1.0, aspect, 0.45);",
-            "    c *= clamp(1.0 - uVignette * dot(p, p) * 1.65, 0.0, 1.0);",
-            "    vec2 px = uv * (uResolution * uFrameScale);",
-            "    float fine = filmHash(px + vec2(uTime * 37.0, uTime * 17.0));",
-            "    float coarse = filmHash(floor(px * 0.5) + vec2(uTime * 19.0, uTime * 43.0));",
-            "    float grain = (fine * 0.65 + coarse * 0.35) - 0.5;",
-            "    c += vec3(grain) * uGrain;",
+            "    c *= clamp(1.0 - uVignette * dot(p, p) * 1.35, 0.0, 1.0);",
+            "    vec2 framePx = uv * (uResolution * uFrameScale);",
+            "    float shortEdge = min(uResolution.x * uFrameScale.x, uResolution.y * uFrameScale.y);",
+            "    float grainScale = max(shortEdge / 1180.0, 1.0);",
+            "    vec2 gx = floor(framePx / grainScale);",
+            "    float fine = filmHash(gx + vec2(uTime * 37.0, uTime * 17.0));",
+            "    float coarse = filmHash(floor(gx * 0.5) + vec2(uTime * 19.0, uTime * 43.0));",
+            "    float grain = (fine * 0.62 + coarse * 0.38) - 0.5;",
+            "    float gLum = dot(clamp(c, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722));",
+            "    float midtone = 0.35 + 0.65 * (4.0 * gLum * (1.0 - gLum));",
+            "    c += vec3(grain) * (uGrain * midtone);",
             "    return clamp(c, 0.0, 1.0);",
             "}"
     );
@@ -333,62 +339,77 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         int w = source.getWidth();
         int h = source.getHeight();
 
-        int[] tex = new int[1];
+        int[] textures = new int[2];
         int[] fbo = new int[1];
-        GLES20.glGenTextures(1, tex, 0);
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, source, 0);
-
+        GLES20.glGenTextures(2, textures, 0);
+        int srcTex = textures[0];
+        int dstTex = textures[1];
         GLES20.glGenFramebuffers(1, fbo, 0);
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0]);
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-                GLES20.GL_TEXTURE_2D, tex[0], 0);
-        int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+
+        try {
+            // Upload source bitmap to a read-only texture and render into a
+            // separate destination texture so the GPU never samples and writes
+            // the same storage in one draw call (FBO feedback loop).
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, source, 0);
+
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dstTex);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0]);
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, dstTex, 0);
+            int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                throw new RuntimeException("Incomplete framebuffer: 0x" + Integer.toHexString(status));
+            }
+
+            GLES20.glViewport(0, 0, w, h);
+            GLES20.glUseProgram(photoProgram);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
+            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h);
+            GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
+            drawQuad(photoLocs, photoTexBuffer);
+            GLES20.glFinish();
+
+            ByteBuffer byteBuf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder());
+            IntBuffer pixels = byteBuf.asIntBuffer();
+            GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels);
+            checkGlError("glReadPixels");
+
+            int[] srcPixels = new int[w * h];
+            pixels.rewind();
+            pixels.get(srcPixels);
+            int[] argb = new int[w * h];
+            for (int y = 0; y < h; y++) {
+                int row = (h - 1 - y) * w;
+                for (int x = 0; x < w; x++) {
+                    int c = srcPixels[row + x];
+                    int r = c & 0xFF;
+                    int g = (c >>> 8) & 0xFF;
+                    int b = (c >>> 16) & 0xFF;
+                    int a = (c >>> 24) & 0xFF;
+                    argb[y * w + x] = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+            }
+            return Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
+        } finally {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             GLES20.glDeleteFramebuffers(1, fbo, 0);
-            GLES20.glDeleteTextures(1, tex, 0);
-            throw new RuntimeException("Incomplete framebuffer: 0x" + Integer.toHexString(status));
+            GLES20.glDeleteTextures(2, textures, 0);
+            GLES20.glViewport(0, 0, viewportW, viewportH);
         }
-
-        GLES20.glViewport(0, 0, w, h);
-        GLES20.glUseProgram(photoProgram);
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
-        applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h);
-        GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
-        drawQuad(photoLocs, photoTexBuffer);
-
-        ByteBuffer byteBuf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder());
-        IntBuffer pixels = byteBuf.asIntBuffer();
-        GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels);
-        checkGlError("glReadPixels");
-
-        int[] srcPixels = new int[w * h];
-        pixels.rewind();
-        pixels.get(srcPixels);
-        int[] argb = new int[w * h];
-        for (int y = 0; y < h; y++) {
-            int row = (h - 1 - y) * w;
-            for (int x = 0; x < w; x++) {
-                int c = srcPixels[row + x];
-                int r = c & 0xFF;
-                int g = (c >>> 8) & 0xFF;
-                int b = (c >>> 16) & 0xFF;
-                int a = (c >>> 24) & 0xFF;
-                argb[y * w + x] = (a << 24) | (r << 16) | (g << 8) | b;
-            }
-        }
-
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-        GLES20.glDeleteFramebuffers(1, fbo, 0);
-        GLES20.glDeleteTextures(1, tex, 0);
-        GLES20.glViewport(0, 0, viewportW, viewportH);
-        return Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
     }
 
     // ---------------------------------------------------------------- internals

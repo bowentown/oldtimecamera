@@ -28,9 +28,9 @@ public final class FilmPresets {
                             0.00f, 1.00f, 0.00f,
                             0.00f, 0.00f, 0.95f)
                     .offset(0.008f, 0.002f, -0.004f)
-                    .saturation(0.94f).contrast(0.92f).brightness(0.012f)
-                    .fade(0.28f).grain(0.048f).vignette(0.22f)
-                    .leak(0.06f).halation(0.45f)
+                    .saturation(0.98f).contrast(1.01f).brightness(0.008f)
+                    .fade(0.16f).grain(0.042f).vignette(0.18f)
+                    .leak(0.04f).halation(0.32f)
                     .leakColor(1f, 0.46f, 0.20f)
                     .paperColor(0xFFF1E9D8)
                     .build(),
@@ -46,9 +46,9 @@ public final class FilmPresets {
                             0.00f, 1.01f, 0.00f,
                             0.00f, 0.01f, 0.88f)
                     .offset(0.014f, 0.004f, -0.012f)
-                    .saturation(1.06f).contrast(1.02f).brightness(0.010f)
-                    .fade(0.20f).grain(0.060f).vignette(0.24f)
-                    .leak(0.16f).halation(0.32f)
+                    .saturation(1.06f).contrast(1.05f).brightness(0.008f)
+                    .fade(0.14f).grain(0.052f).vignette(0.20f)
+                    .leak(0.12f).halation(0.24f)
                     .leakColor(1f, 0.58f, 0.16f)
                     .paperColor(0xFFEFE1BE)
                     .build(),
@@ -64,9 +64,9 @@ public final class FilmPresets {
                             0.00f, 1.03f, 0.01f,
                             0.00f, 0.01f, 1.06f)
                     .offset(-0.006f, 0.002f, 0.010f)
-                    .saturation(1.02f).contrast(1.00f).brightness(0f)
-                    .fade(0.22f).grain(0.066f).vignette(0.26f)
-                    .leak(0.05f).halation(0.18f)
+                    .saturation(1.02f).contrast(1.03f).brightness(0f)
+                    .fade(0.16f).grain(0.056f).vignette(0.22f)
+                    .leak(0.04f).halation(0.16f)
                     .leakColor(0.36f, 0.86f, 0.70f)
                     .paperColor(0xFFEDEEE6)
                     .build(),
@@ -99,9 +99,9 @@ public final class FilmPresets {
                             0.00f, 0.99f, 0.03f,
                             0.01f, 0.02f, 1.12f)
                     .offset(-0.010f, 0.002f, 0.018f)
-                    .saturation(1.04f).contrast(1.08f).brightness(-0.004f)
-                    .fade(0.16f).grain(0.068f).vignette(0.32f)
-                    .leak(0.08f).halation(0.88f)
+                    .saturation(1.04f).contrast(1.10f).brightness(-0.004f)
+                    .fade(0.14f).grain(0.058f).vignette(0.28f)
+                    .leak(0.07f).halation(0.78f)
                     .leakColor(0.96f, 0.28f, 0.14f)
                     .paperColor(0xFFECECE8)
                     .build(),
@@ -148,8 +148,8 @@ public final class FilmPresets {
                     .shortNote("人文黑白 · 柔滑灰阶")
                     .swatch(0xFF7B7973)
                     .matrix(1, 0, 0, 0, 1, 0, 0, 0, 1)
-                    .saturation(0f).contrast(1.06f).brightness(0.012f)
-                    .fade(0.24f).grain(0.082f).vignette(0.26f)
+                    .saturation(0f).contrast(1.10f).brightness(0.010f)
+                    .fade(0.18f).grain(0.072f).vignette(0.22f)
                     .leak(0f).halation(0.10f)
                     .grayscale(true)
                     .paperColor(0xFFEDEAE2)
@@ -167,9 +167,9 @@ public final class FilmPresets {
                             0.00f, 1.00f, 0.01f,
                             0.00f, 0.00f, 0.86f)
                     .offset(0.018f, 0.010f, -0.010f)
-                    .saturation(0.84f).contrast(0.88f).brightness(0.018f)
-                    .fade(0.48f).grain(0.085f).vignette(0.40f)
-                    .leak(0.26f).halation(0.34f)
+                    .saturation(0.86f).contrast(0.95f).brightness(0.012f)
+                    .fade(0.36f).grain(0.072f).vignette(0.32f)
+                    .leak(0.20f).halation(0.28f)
                     .leakColor(1f, 0.52f, 0.24f)
                     .paperColor(0xFFF6F0DC)
                     .build()

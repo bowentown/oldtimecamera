@@ -90,6 +90,19 @@ public final class PhotoSaver {
         return out;
     }
 
+    /** Bilinearly scales a decoded bitmap so its longest side fits within maxEdge. */
+    public static Bitmap capEdge(Bitmap src, int maxEdge) {
+        if (src == null || maxEdge <= 0) return src;
+        int curLongest = Math.max(src.getWidth(), src.getHeight());
+        if (curLongest <= maxEdge) return src;
+        float scale = (float) maxEdge / (float) curLongest;
+        int nw = Math.max(1, Math.round(src.getWidth() * scale));
+        int nh = Math.max(1, Math.round(src.getHeight() * scale));
+        Bitmap scaled = Bitmap.createScaledBitmap(src, nw, nh, true);
+        if (scaled != src) src.recycle();
+        return scaled;
+    }
+
     /** Adds the selected print border, frame badge, optional note, and LED date stamp. */
     public static Bitmap applyPaper(Bitmap photo, FilmPreset preset,
                                     CameraPrefs.PaperStyle paperStyle,
@@ -298,7 +311,7 @@ public final class PhotoSaver {
             if (uri == null) throw new IOException("MediaStore insert failed");
             try (OutputStream os = resolver.openOutputStream(uri)) {
                 if (os == null) throw new IOException("Cannot open output stream");
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 93, os)) {
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
                     throw new IOException("JPEG compression failed");
                 }
             }
@@ -316,7 +329,7 @@ public final class PhotoSaver {
         }
         File file = new File(dir, name);
         try (OutputStream os = new FileOutputStream(file)) {
-            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 93, os)) {
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
                 throw new IOException("JPEG compression failed");
             }
         }
@@ -387,7 +400,8 @@ public final class PhotoSaver {
             int longest = Math.max(bounds.outWidth, bounds.outHeight);
             if (longest <= 0) return null;
             int sample = 1;
-            while (longest / sample > maxEdge) sample *= 2;
+            int sampleLimit = maxEdge >= 1024 ? maxEdge * 2 : maxEdge;
+            while (longest / sample > sampleLimit) sample *= 2;
 
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = sample;
@@ -398,6 +412,10 @@ public final class PhotoSaver {
                 decoded = BitmapFactory.decodeStream(is, null, opts);
             }
             if (decoded == null) return null;
+
+            if (maxEdge >= 1024) {
+                decoded = capEdge(decoded, maxEdge);
+            }
 
             int exifDeg = readExifRotation(resolver, uri);
             if (exifDeg != 0) {

@@ -35,7 +35,7 @@ public final class DarkroomEditorDialog {
     }
 
     private static final int PREVIEW_EDGE = 1080;
-    private static final int EXPORT_EDGE = 2048;
+    private static final int EXPORT_EDGE = 2560;
 
     private DarkroomEditorDialog() {}
 

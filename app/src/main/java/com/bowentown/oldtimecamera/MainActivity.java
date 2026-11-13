@@ -67,7 +67,7 @@ import java.util.concurrent.TimeUnit;
 public class MainActivity extends ComponentActivity {
 
     private static final int REQUEST_PERMISSIONS = 1001;
-    private static final int MAX_PHOTO_EDGE = 2048;
+    private static final int MAX_PHOTO_EDGE = 2560;
 
     private CameraPrefs prefs;
     private FilmPreset[] presets;
@@ -594,7 +594,7 @@ public class MainActivity extends ComponentActivity {
                         .setTargetRotation(rotation)
                         .build();
                 imageCapture = new ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                         .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                         .setTargetRotation(rotation)
                         .build();
@@ -715,11 +715,19 @@ public class MainActivity extends ComponentActivity {
             public void onCaptureSuccess(@NonNull ImageProxy image) {
                 try {
                     byte[] jpeg = readJpeg(image);
-                    int rotation = exifRotation(jpeg);
+                    int proxyRotation = image.getImageInfo().getRotationDegrees();
+                    int exifDeg = exifRotation(jpeg);
                     image.close();
 
                     Bitmap source = decode(jpeg, MAX_PHOTO_EDGE);
                     if (source == null) throw new IllegalStateException("Cannot decode capture");
+                    int rotation = exifDeg != 0 ? exifDeg : proxyRotation;
+                    if (rotation == 0 && source.getWidth() > source.getHeight()
+                            && manualRotation < 0 && (autoDegrees % 180 != 0)) {
+                        // Fallback if a device HAL strips both EXIF orientation and
+                        // ImageInfo rotation while returning an unrotated sensor JPEG.
+                        rotation = autoDegrees;
+                    }
                     Bitmap rotated = rotate(source, rotation);
                     if (mirrorSelfie) {
                         rotated = PhotoSaver.flipHorizontal(rotated);
@@ -859,12 +867,14 @@ public class MainActivity extends ComponentActivity {
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, bounds);
         int longest = Math.max(bounds.outWidth, bounds.outHeight);
+        if (longest <= 0) return null;
         int sample = 1;
-        while (longest / sample > maxEdge) sample *= 2;
+        while (longest / sample > maxEdge * 2) sample *= 2;
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = sample;
         opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, opts);
+        Bitmap decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, opts);
+        return PhotoSaver.capEdge(decoded, maxEdge);
     }
 
     private static Bitmap rotate(Bitmap src, int degrees) {
