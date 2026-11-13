@@ -13,7 +13,9 @@ public final class CameraPrefs {
     public enum AspectRatio {
         RATIO_3_4("3:4", 3f / 4f),
         RATIO_3_2("3:2", 3f / 2f),
-        RATIO_1_1("1:1", 1f);
+        RATIO_1_1("1:1", 1f),
+        RATIO_16_9("16:9", 16f / 9f),
+        RATIO_XPAN("XPAN", 65f / 24f);
 
         public final String label;
         public final float widthOverHeight;
@@ -77,6 +79,7 @@ public final class CameraPrefs {
     private static final String KEY_SOUND = "shutter_sound";
     private static final String KEY_FRONT_MIRROR = "front_mirror";
     private static final String KEY_TIMER_SECONDS = "timer_seconds";
+    private static final String KEY_LEVEL_ENABLED = "level_enabled";
     private static final String KEY_MANUAL_ROTATION = "manual_rotation";
     private static final String KEY_LAST_PHOTO_URI = "last_photo_uri";
 
@@ -182,6 +185,14 @@ public final class CameraPrefs {
 
     public void setTimerSeconds(int seconds) {
         sp.edit().putInt(KEY_TIMER_SECONDS, seconds).apply();
+    }
+
+    public boolean isLevelEnabled() {
+        return sp.getBoolean(KEY_LEVEL_ENABLED, false);
+    }
+
+    public void setLevelEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_LEVEL_ENABLED, enabled).apply();
     }
 
     public int getManualRotation() {

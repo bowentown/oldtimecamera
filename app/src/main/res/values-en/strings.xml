@@ -1,69 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Old Time Camera</string>
-    <string name="brand_title">OLD TIME</string>
     <string name="shutter">Shutter</string>
     <string name="switch_camera">Switch Camera</string>
     <string name="flash">Flash</string>
     <string name="settings">Darkroom Settings</string>
     <string name="thumbnail">Film Roll</string>
     <string name="darkroom_import">Develop from Gallery</string>
-    <string name="camera_permission_needed">Camera permission is needed to open the viewfinder</string>
-    <string name="grant_permission">Enable Camera</string>
-    <string name="saved_to_gallery">Saved to OldTimeCamera</string>
+    <string name="camera_permission_needed">Camera permission required</string>
+    <string name="grant_permission">Enable</string>
+    <string name="saved_to_gallery">Saved</string>
     <string name="save_failed">Save failed</string>
-    <string name="capture_busy">Developing previous frame…</string>
-    <string name="new_roll_loaded">Roll %1$02d finished · Loaded Roll %2$02d</string>
+    <string name="capture_busy">Developing…</string>
+    <string name="camera_start_failed">Camera failed: %1$s</string>
+    <string name="capture_failed">Capture failed: %1$s</string>
+    <string name="new_roll_loaded">Roll #%2$02d</string>
 
     <string name="hud_grid">GRID</string>
     <string name="hud_timer_off">TIMER</string>
+    <string name="hud_double_exp">2×EXP</string>
 
     <string name="sheet_title">DARKROOM</string>
-    <string name="sheet_aspect">ASPECT RATIO</string>
-    <string name="sheet_paper">PRINT BORDER</string>
-    <string name="sheet_date">DATE STAMP</string>
-    <string name="sheet_options">FILM CHARACTER</string>
-    <string name="sheet_calibration">CALIBRATION</string>
+    <string name="sheet_aspect">ASPECT</string>
+    <string name="sheet_paper">BORDER</string>
+    <string name="sheet_date">DATE</string>
+    <string name="sheet_options">FILM</string>
+    <string name="sheet_calibration">CALIBRATE</string>
 
-    <string name="paper_ivory">Ivory Paper</string>
-    <string name="paper_black">Film Black</string>
-    <string name="paper_none">Borderless</string>
+    <string name="paper_ivory">Ivory</string>
+    <string name="paper_black">Black</string>
+    <string name="paper_none">None</string>
 
     <string name="date_today">Today</string>
-    <string name="date_retro">\'98 Retro</string>
+    <string name="date_retro">\'98</string>
     <string name="date_off">Off</string>
 
-    <string name="grain_boost">Boost Silver Grain</string>
-    <string name="light_leak">Organic Light Leak</string>
-    <string name="grid_overlay">Rule of Thirds Grid</string>
-    <string name="shutter_sound">Mechanical Shutter Click</string>
-    <string name="front_mirror">Mirror Selfie Capture</string>
+    <string name="grain_boost">Grain</string>
+    <string name="light_leak">Leak</string>
+    <string name="level_overlay">Level</string>
+    <string name="shutter_sound">Shutter</string>
+    <string name="front_mirror">Mirror</string>
 
-    <string name="rotate_viewfinder">Viewfinder Rotation</string>
+    <string name="rotate_viewfinder">Rotate</string>
     <string name="rotation_auto">Auto</string>
-    <string name="load_new_roll">Load Fresh Roll</string>
+    <string name="load_new_roll">New Roll</string>
     <string name="done">Done</string>
 
     <string name="flash_auto">AUTO</string>
     <string name="flash_on">ON</string>
     <string name="flash_off">OFF</string>
 
-    <string name="editor_title">DARKROOM LAB</string>
-    <string name="editor_note_hint">Add an optional print caption…</string>
-    <string name="editor_save">Develop Print</string>
-    <string name="editor_developing">Developing film…</string>
-    <string name="editor_load_failed">Unable to decode selected image</string>
+    <string name="editor_title">LAB</string>
+    <string name="editor_note_hint">Note…</string>
+    <string name="editor_save">Develop</string>
+    <string name="editor_developing">Saving…</string>
+    <string name="editor_load_failed">Read failed</string>
 
-    <string name="gallery_title">FILM ARCHIVE</string>
-    <string name="gallery_empty">No frames exposed yet\nSnap a moment or import a photo into the darkroom</string>
-    <string name="gallery_frames">%1$d FRAMES</string>
+    <string name="gallery_title">ARCHIVE</string>
+    <string name="gallery_empty">No frames yet</string>
+    <string name="gallery_frames">%1$d</string>
     <string name="gallery_contact_sheet">SHEET</string>
-    <string name="gallery_select_hint">Select 2–9 frames for a 35mm Contact Sheet</string>
-    <string name="gallery_make_sheet">EXPORT SHEET (%1$d)</string>
-    <string name="gallery_sheet_saved">35mm Contact Sheet saved</string>
+    <string name="gallery_select_hint">Select 2–9</string>
+    <string name="gallery_make_sheet">SHEET (%1$d)</string>
+    <string name="gallery_sheet_saved">Sheet saved</string>
     <string name="gallery_share">Share</string>
     <string name="gallery_delete">Delete</string>
-    <string name="gallery_delete_confirm">Delete this frame from device storage?</string>
+    <string name="gallery_delete_confirm">Delete this frame?</string>
     <string name="gallery_deleted">Deleted</string>
     <string name="cancel">Cancel</string>
 </resources>

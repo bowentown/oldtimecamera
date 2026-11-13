@@ -39,10 +39,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug + release APK
+      - name: Run unit tests & build debug + release APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+          ./gradlew testDebugUnitTest assembleDebug assembleRelease --no-daemon --stacktrace
 
       - name: List outputs
         run: find app/build/outputs/apk -name '*.apk' -print

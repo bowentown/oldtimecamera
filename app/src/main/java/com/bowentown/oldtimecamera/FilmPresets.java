@@ -6,10 +6,10 @@ public final class FilmPresets {
     private static final FilmPreset[] STOCKS = {
             FilmPreset.builder()
                     .id("raw")
-                    .name("ORIGINAL")
+                    .name("RAW")
                     .isoTag("RAW")
                     .note("原片直出 · 仅保留相纸与日期")
-                    .shortNote("原片直出 · 真实色彩")
+                    .shortNote("原片直出")
                     .swatch(0xFF9E988E)
                     .matrix(1, 0, 0, 0, 1, 0, 0, 0, 1)
                     .saturation(1f).contrast(1f).fade(0f)
@@ -22,7 +22,7 @@ public final class FilmPresets {
                     .name("PORTRA 400")
                     .isoTag("400")
                     .note("暖肤色 / 低反差 / 细颗粒 / 象牙相纸")
-                    .shortNote("暖肤色 · 低反差 · 温柔人像")
+                    .shortNote("暖肤色 · 低反差")
                     .swatch(0xFFD9A583)
                     .matrix(1.05f, 0.01f, 0.00f,
                             0.00f, 1.00f, 0.00f,
@@ -40,7 +40,7 @@ public final class FilmPresets {
                     .name("GOLD 200")
                     .isoTag("200")
                     .note("金黄日光 / 暖高光 / 暖黄漏光 / 米黄相纸")
-                    .shortNote("金黄日光 · 暖调街头")
+                    .shortNote("金黄日光 · 暖调")
                     .swatch(0xFFD8A745)
                     .matrix(1.08f, 0.02f, 0.00f,
                             0.00f, 1.01f, 0.00f,
@@ -55,10 +55,10 @@ public final class FilmPresets {
 
             FilmPreset.builder()
                     .id("superia400")
-                    .name("SUPERIA 400")
+                    .name("SUPERIA")
                     .isoTag("400")
                     .note("青绿阴影 / 冷调街拍 / 冷白相纸")
-                    .shortNote("青绿暗部 · 清透日常")
+                    .shortNote("青绿暗部 · 清透")
                     .swatch(0xFF6F9182)
                     .matrix(0.96f, 0.00f, 0.00f,
                             0.00f, 1.03f, 0.01f,
@@ -76,7 +76,7 @@ public final class FilmPresets {
                     .name("VELVIA 50")
                     .isoTag("50")
                     .note("反转正片 / 高饱和 / 深蓝绿 / 强反差")
-                    .shortNote("高饱和反转 · 浓郁风景")
+                    .shortNote("高饱和反转")
                     .swatch(0xFF2F7A5B)
                     .matrix(1.02f, 0.00f, 0.00f,
                             0.00f, 1.04f, 0.00f,
@@ -90,10 +90,10 @@ public final class FilmPresets {
 
             FilmPreset.builder()
                     .id("cinestill800t")
-                    .name("800T CINE")
+                    .name("800T")
                     .isoTag("800T")
                     .note("钨丝电影卷 / 冷青夜色 / 霓虹红晕")
-                    .shortNote("夜景电影 · 冷青红晕")
+                    .shortNote("夜景电影 · 红晕")
                     .swatch(0xFF4F7C94)
                     .matrix(0.94f, 0.00f, 0.02f,
                             0.00f, 0.99f, 0.03f,
@@ -111,7 +111,7 @@ public final class FilmPresets {
                     .name("KODA 64")
                     .isoTag("64")
                     .note("纪实暖褐 / 浓郁红黄 / 岁月质感")
-                    .shortNote("复古纪实 · 暖红厚重")
+                    .shortNote("复古纪实 · 暖红")
                     .swatch(0xFFB85D43)
                     .matrix(1.09f, 0.01f, -0.02f,
                             0.01f, 0.99f, -0.01f,
@@ -129,7 +129,7 @@ public final class FilmPresets {
                     .name("TRI-X 400")
                     .isoTag("B&W")
                     .note("黑白硬调 / 粗银盐颗粒 / 重暗角")
-                    .shortNote("经典黑白 · 硬朗颗粒")
+                    .shortNote("经典黑白 · 硬调")
                     .swatch(0xFF5A5A58)
                     .matrix(1, 0, 0, 0, 1, 0, 0, 0, 1)
                     .saturation(0f).contrast(1.24f).brightness(0.004f)
@@ -142,10 +142,10 @@ public final class FilmPresets {
 
             FilmPreset.builder()
                     .id("hp5")
-                    .name("HP5 PLUS")
+                    .name("HP5")
                     .isoTag("B&W")
                     .note("人文黑白 / 柔和灰阶 / 宽容影调")
-                    .shortNote("人文黑白 · 柔滑灰阶")
+                    .shortNote("人文黑白 · 柔调")
                     .swatch(0xFF7B7973)
                     .matrix(1, 0, 0, 0, 1, 0, 0, 0, 1)
                     .saturation(0f).contrast(1.10f).brightness(0.010f)
@@ -158,10 +158,10 @@ public final class FilmPresets {
 
             FilmPreset.builder()
                     .id("polaroid600")
-                    .name("POLAROID 600")
+                    .name("POLA 600")
                     .isoTag("600")
                     .note("一次成像 / 褪色偏黄 / 奶油漏光")
-                    .shortNote("一次成像 · 褪色奶油")
+                    .shortNote("一次成像 · 褪色")
                     .swatch(0xFFC8B58C)
                     .matrix(1.04f, 0.02f, 0.00f,
                             0.00f, 1.00f, 0.01f,

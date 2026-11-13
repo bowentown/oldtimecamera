@@ -202,14 +202,55 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private Locs previewLocs, photoLocs;
     private FloatBuffer quadBuffer, cameraTexBuffer, photoTexBuffer;
 
+    interface OnAxisSwapListener {
+        void onAxisSwapChanged(boolean swapped);
+    }
+
+    private static final class TransformConfig {
+        final boolean hasCameraTransform;
+        final int infoRotationDegrees;
+        final boolean infoMirroring;
+        final float cropLeftNorm;
+        final float cropTopNorm;
+        final float cropRightNorm;
+        final float cropBottomNorm;
+        final int displayRotationDegrees;
+        final int manualOffsetDegrees;
+        final boolean extraMirrorFlip;
+
+        TransformConfig(
+                boolean hasCameraTransform,
+                int infoRotationDegrees,
+                boolean infoMirroring,
+                float cropLeftNorm,
+                float cropTopNorm,
+                float cropRightNorm,
+                float cropBottomNorm,
+                int displayRotationDegrees,
+                int manualOffsetDegrees,
+                boolean extraMirrorFlip) {
+            this.hasCameraTransform = hasCameraTransform;
+            this.infoRotationDegrees = infoRotationDegrees;
+            this.infoMirroring = infoMirroring;
+            this.cropLeftNorm = cropLeftNorm;
+            this.cropTopNorm = cropTopNorm;
+            this.cropRightNorm = cropRightNorm;
+            this.cropBottomNorm = cropBottomNorm;
+            this.displayRotationDegrees = displayRotationDegrees;
+            this.manualOffsetDegrees = manualOffsetDegrees;
+            this.extraMirrorFlip = extraMirrorFlip;
+        }
+    }
+
     private final float[] stMatrix = new float[16];
-    private final float[] rotMatrix = new float[16];
     private final float[] texMatrix = new float[16];
     private final float[] identity = new float[16];
 
     private int viewportW = 1, viewportH = 1;
-    private volatile int rotationDegrees = 0;
-    private volatile boolean mirror = false;
+    private volatile TransformConfig transformConfig = new TransformConfig(
+            true, 0, false, 0f, 0f, 1f, 1f, 0, 0, false);
+    private volatile OnAxisSwapListener axisSwapListener;
+    private Boolean lastReportedAxisSwap = null;
     private volatile FilmPreset preset;
     private volatile boolean grainBoost = false;
     private volatile boolean lightLeakEnabled = true;
@@ -289,9 +330,38 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     // ---------------------------------------------------------------- public API
 
-    void setTransform(int degrees, boolean mirrored) {
-        rotationDegrees = degrees;
-        mirror = mirrored;
+    void setOnAxisSwapListener(OnAxisSwapListener listener) {
+        this.axisSwapListener = listener;
+        Boolean reported = lastReportedAxisSwap;
+        if (listener != null && reported != null) {
+            boolean val = reported;
+            view.post(() -> listener.onAxisSwapChanged(val));
+        }
+    }
+
+    void setTransform(
+            boolean hasCameraTransform,
+            int infoRotationDegrees,
+            boolean infoMirroring,
+            float cropLeftNorm,
+            float cropTopNorm,
+            float cropRightNorm,
+            float cropBottomNorm,
+            int displayRotationDegrees,
+            int manualOffsetDegrees,
+            boolean extraMirrorFlip) {
+        this.transformConfig = new TransformConfig(
+                hasCameraTransform,
+                infoRotationDegrees,
+                infoMirroring,
+                cropLeftNorm,
+                cropTopNorm,
+                cropRightNorm,
+                cropBottomNorm,
+                displayRotationDegrees,
+                manualOffsetDegrees,
+                extraMirrorFlip);
+        this.lastReportedAxisSwap = null;
         view.requestRender();
     }
 
@@ -438,14 +508,29 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     }
 
     private void buildTexMatrix() {
-        Matrix.setIdentityM(rotMatrix, 0);
-        Matrix.translateM(rotMatrix, 0, 0.5f, 0.5f, 0f);
-        Matrix.rotateM(rotMatrix, 0, (float) rotationDegrees, 0f, 0f, 1f);
-        if (mirror) {
-            Matrix.scaleM(rotMatrix, 0, -1f, 1f, 1f);
+        TransformConfig cfg = transformConfig;
+        float[] computed = CameraTransformMath.computePreviewTexMatrix(
+                stMatrix,
+                cfg.hasCameraTransform,
+                cfg.infoRotationDegrees,
+                cfg.infoMirroring,
+                cfg.cropLeftNorm,
+                cfg.cropTopNorm,
+                cfg.cropRightNorm,
+                cfg.cropBottomNorm,
+                cfg.displayRotationDegrees,
+                cfg.manualOffsetDegrees,
+                cfg.extraMirrorFlip);
+        System.arraycopy(computed, 0, texMatrix, 0, 16);
+
+        boolean swapped = CameraTransformMath.isMatrixAxisSwapped(texMatrix);
+        if (lastReportedAxisSwap == null || lastReportedAxisSwap != swapped) {
+            lastReportedAxisSwap = swapped;
+            OnAxisSwapListener listener = axisSwapListener;
+            if (listener != null) {
+                view.post(() -> listener.onAxisSwapChanged(swapped));
+            }
         }
-        Matrix.translateM(rotMatrix, 0, -0.5f, -0.5f, 0f);
-        Matrix.multiplyMM(texMatrix, 0, rotMatrix, 0, stMatrix, 0);
     }
 
     private void drawQuad(Locs l, FloatBuffer texCoords) {

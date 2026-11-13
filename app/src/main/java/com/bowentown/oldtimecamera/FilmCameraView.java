@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLSurfaceView;
+import android.os.Looper;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -26,6 +27,8 @@ public final class FilmCameraView extends GLSurfaceView {
     public interface OnGestureListener {
         void onTapFocus(float viewX, float viewY, int viewWidth, int viewHeight);
         void onPinchZoom(float scaleFactor);
+        default void onDoubleTapFlip() {}
+        default void onSwipeFilm(int direction) {}
     }
 
     private final GLFilmRenderer renderer;
@@ -54,11 +57,34 @@ public final class FilmCameraView extends GLSurfaceView {
             }
 
             @Override
-            public boolean onSingleTapUp(MotionEvent e) {
+            public boolean onSingleTapConfirmed(MotionEvent e) {
                 if (!pinching && gestureListener != null && getWidth() > 0 && getHeight() > 0) {
                     gestureListener.onTapFocus(e.getX(), e.getY(), getWidth(), getHeight());
                 }
                 return true;
+            }
+
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                if (!pinching && gestureListener != null) {
+                    gestureListener.onDoubleTapFlip();
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (pinching || gestureListener == null || e1 == null || e2 == null || getWidth() <= 0) {
+                    return false;
+                }
+                float dx = e2.getX() - e1.getX();
+                float dy = e2.getY() - e1.getY();
+                float minDist = Math.max(80f, getWidth() * 0.14f);
+                if (Math.abs(dx) > minDist && Math.abs(dx) > Math.abs(dy) * 1.5f && Math.abs(velocityX) > 300f) {
+                    gestureListener.onSwipeFilm(dx < 0 ? 1 : -1);
+                    return true;
+                }
+                return false;
             }
         });
 
@@ -136,8 +162,32 @@ public final class FilmCameraView extends GLSurfaceView {
         renderer.setFrameScale(scaleX, scaleY);
     }
 
-    public void setCameraTransform(int rotationDegrees, boolean mirrored) {
-        renderer.setTransform(rotationDegrees, mirrored);
+    public void setOnAxisSwapListener(GLFilmRenderer.OnAxisSwapListener listener) {
+        renderer.setOnAxisSwapListener(listener);
+    }
+
+    public void setCameraTransform(
+            boolean hasCameraTransform,
+            int infoRotationDegrees,
+            boolean infoMirroring,
+            float cropLeftNorm,
+            float cropTopNorm,
+            float cropRightNorm,
+            float cropBottomNorm,
+            int displayRotationDegrees,
+            int manualOffsetDegrees,
+            boolean extraMirrorFlip) {
+        renderer.setTransform(
+                hasCameraTransform,
+                infoRotationDegrees,
+                infoMirroring,
+                cropLeftNorm,
+                cropTopNorm,
+                cropRightNorm,
+                cropBottomNorm,
+                displayRotationDegrees,
+                manualOffsetDegrees,
+                extraMirrorFlip);
     }
 
     public float getSensorAspectRatio() {
@@ -147,13 +197,18 @@ public final class FilmCameraView extends GLSurfaceView {
     /** Fit the viewfinder to the (rotated) camera buffer aspect ratio. */
     public void setAspectRatio(int width, int height) {
         if (width <= 0 || height <= 0) return;
-        post(() -> {
+        Runnable apply = () -> {
             if (ratioW != width || ratioH != height) {
                 ratioW = width;
                 ratioH = height;
                 requestLayout();
             }
-        });
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            apply.run();
+        } else {
+            post(apply);
+        }
     }
 
     /**
@@ -188,17 +243,17 @@ public final class FilmCameraView extends GLSurfaceView {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        if (ratioW <= 0 || ratioH <= 0) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
+        int height = MeasureSpec.getSize(heightMeasureSpec);
+        if (ratioW <= 0 || ratioH <= 0 || width <= 0 || height <= 0) {
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             return;
         }
-        int width = MeasureSpec.getSize(widthMeasureSpec);
-        int height = MeasureSpec.getSize(heightMeasureSpec);
         float ratio = (float) ratioW / (float) ratioH;
         if ((float) width / (float) height > ratio) {
-            width = Math.round(height * ratio);
+            width = Math.max(1, Math.round(height * ratio));
         } else {
-            height = Math.round(width / ratio);
+            height = Math.max(1, Math.round(width / ratio));
         }
         setMeasuredDimension(width, height);
     }

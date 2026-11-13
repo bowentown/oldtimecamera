@@ -5,9 +5,15 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.ExifInterface;
 import android.media.MediaActionSound;
 import android.net.Uri;
@@ -16,8 +22,10 @@ import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.util.Range;
 import android.util.Size;
+import android.view.Display;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
+import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowManager;
@@ -37,6 +45,7 @@ import androidx.annotation.NonNull;
 import androidx.camera.core.AspectRatio;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.DisplayOrientedMeteringPointFactory;
 import androidx.camera.core.ExposureState;
 import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
@@ -44,7 +53,6 @@ import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
-import androidx.camera.core.SurfaceOrientedMeteringPointFactory;
 import androidx.camera.core.SurfaceRequest;
 import androidx.camera.core.ZoomState;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -59,6 +67,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Main viewfinder activity: CameraX preview & capture, unified OpenGL ES film
@@ -73,11 +82,12 @@ public class MainActivity extends ComponentActivity {
     private FilmPreset[] presets;
     private final List<LinearLayout> chips = new ArrayList<>();
 
+    private AspectFrameLayout previewHost;
     private FilmCameraView previewView;
     private ViewfinderOverlayView viewfinderOverlay;
-    private TextView caption, rollCounter, dateStampPreview, countdownText;
+    private TextView rollCounter, dateStampPreview, countdownText;
     private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
-    private ImageButton flashButton, gridPill;
+    private ImageButton flashButton, gridPill, doubleExposurePill;
     private ImageView timerIcon, thumbnail, thumbPlaceholder;
     private HorizontalScrollView filmStripScroll;
     private LinearLayout chipContainer, evPanel;
@@ -86,13 +96,14 @@ public class MainActivity extends ComponentActivity {
     private View shutterCore, flashOverlay, permissionGate;
 
     private final ExecutorService cameraExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicInteger bindGeneration = new AtomicInteger(0);
     private ProcessCameraProvider cameraProvider;
     private Camera camera;
     private ImageCapture imageCapture;
     private MediaActionSound shutterSound;
 
     private int currentPreset = 1;
-    private boolean facingFront = false;
+    private volatile boolean facingFront = false;
     private int flashMode = ImageCapture.FLASH_MODE_AUTO;
     private CameraPrefs.AspectRatio aspectRatio = CameraPrefs.AspectRatio.RATIO_3_4;
     private CameraPrefs.PaperStyle paperStyle = CameraPrefs.PaperStyle.IVORY;
@@ -100,24 +111,50 @@ public class MainActivity extends ComponentActivity {
     private boolean grainBoost = false;
     private boolean lightLeakEnabled = true;
     private boolean gridEnabled = false;
+    private boolean levelEnabled = false;
     private boolean shutterSoundEnabled = true;
-    private boolean frontMirrorEnabled = true;
+    private volatile boolean frontMirrorEnabled = true;
+    private boolean doubleExposureMode = false;
+    private Bitmap doubleExposureFirstFrame = null;
     private int timerSeconds = 0;
     private int rollNumber = 1;
     private int exposures = 0;
     private float leakSeed = 0.28f;
 
-    private boolean capturing = false;
+    private volatile boolean capturing = false;
+    private boolean latestAxisSwapped = true;
     private CountDownTimer activeTimer;
     private float currentZoom = 1f;
     private int evMin = 0, evMax = 0;
     private float evStep = 0.333f;
 
-    // Sensor orientation differs across devices. -1 follows CameraX; otherwise
-    // the user can force a rotation from the darkroom settings sheet.
+    // Latest CameraX transform metadata + optional user manual calibration.
     private volatile int manualRotation = -1;
     private volatile int autoDegrees = 90;
     private volatile int bufferW = 4, bufferH = 3;
+    private volatile boolean latestHasCameraTransform = true;
+    private volatile int latestInfoRotation = 90;
+    private volatile boolean latestInfoMirroring = false;
+    private volatile float latestCropL = 0f, latestCropT = 0f, latestCropR = 1f, latestCropB = 1f;
+    private volatile int deviceSurfaceRotation = Surface.ROTATION_0;
+
+    private OrientationEventListener orientationListener;
+    private SensorManager sensorManager;
+    private Sensor accelerometer;
+    private float smoothGravityX = 0f, smoothGravityY = 9.81f;
+    private final SensorEventListener levelSensorListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (!levelEnabled || event.values == null || event.values.length < 2) return;
+            smoothGravityX = smoothGravityX * 0.82f + event.values[0] * 0.18f;
+            smoothGravityY = smoothGravityY * 0.82f + event.values[1] * 0.18f;
+            float tiltDeg = (float) Math.toDegrees(Math.atan2(-smoothGravityX, smoothGravityY));
+            viewfinderOverlay.setTiltDegrees(tiltDeg);
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    };
 
     private final ActivityResultLauncher<String> pickPhotoLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -135,6 +172,7 @@ public class MainActivity extends ComponentActivity {
 
         prefs = new CameraPrefs(this);
         presets = FilmPresets.all();
+        deviceSurfaceRotation = getDisplaySurfaceRotation();
         loadPrefs();
 
         bindViews();
@@ -144,6 +182,7 @@ public class MainActivity extends ComponentActivity {
             applyPreset(idx);
         });
         wireControls();
+        initOrientationAndLevelSensors();
 
         shutterSound = new MediaActionSound();
         cameraExecutor.execute(() -> shutterSound.load(MediaActionSound.SHUTTER_CLICK));
@@ -151,6 +190,8 @@ public class MainActivity extends ComponentActivity {
         applyPreset(currentPreset);
         applyAspectRatio(false);
         updateGridUi();
+        updateLevelUi();
+        updateDoubleExposureUi();
         updateTimerUi();
         updateStampPreview();
         updateRollCounter();
@@ -166,6 +207,7 @@ public class MainActivity extends ComponentActivity {
         grainBoost = prefs.isGrainBoost();
         lightLeakEnabled = prefs.isLightLeakEnabled();
         gridEnabled = prefs.isGridEnabled();
+        levelEnabled = prefs.isLevelEnabled();
         shutterSoundEnabled = prefs.isShutterSoundEnabled();
         frontMirrorEnabled = prefs.isFrontMirrorEnabled();
         timerSeconds = prefs.getTimerSeconds();
@@ -177,9 +219,9 @@ public class MainActivity extends ComponentActivity {
     // ------------------------------------------------------------------ view setup
 
     private void bindViews() {
+        previewHost = findViewById(R.id.previewHost);
         previewView = findViewById(R.id.preview);
         viewfinderOverlay = findViewById(R.id.viewfinderOverlay);
-        caption = findViewById(R.id.presetCaption);
         rollCounter = findViewById(R.id.rollCounter);
         dateStampPreview = findViewById(R.id.dateStamp);
         countdownText = findViewById(R.id.countdownText);
@@ -193,6 +235,7 @@ public class MainActivity extends ComponentActivity {
         evSeekBar = findViewById(R.id.evSeekBar);
         evValueText = findViewById(R.id.evValueText);
         gridPill = findViewById(R.id.gridPill);
+        doubleExposurePill = findViewById(R.id.doubleExposurePill);
         filmStripScroll = findViewById(R.id.filmStripScroll);
         chipContainer = findViewById(R.id.chipContainer);
         shutterButton = findViewById(R.id.shutterButton);
@@ -218,9 +261,31 @@ public class MainActivity extends ComponentActivity {
                 pickPhotoLauncher.launch("image/*"));
 
         aspectPill.setOnClickListener(v -> {
+            if (capturing) {
+                toast(R.string.capture_busy);
+                return;
+            }
             aspectRatio = aspectRatio.next();
             prefs.setAspectRatio(aspectRatio);
+            clearDoubleExposureFrame();
+            updateDoubleExposureUi();
             applyAspectRatio(true);
+        });
+
+        dateStampPreview.setOnClickListener(v -> {
+            dateMode = (dateMode == CameraPrefs.DateMode.TODAY)
+                    ? CameraPrefs.DateMode.RETRO_98
+                    : CameraPrefs.DateMode.TODAY;
+            prefs.setDateMode(dateMode);
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            updateStampPreview();
+        });
+        dateStampPreview.setOnLongClickListener(v -> {
+            dateMode = CameraPrefs.DateMode.OFF;
+            prefs.setDateMode(dateMode);
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            updateStampPreview();
+            return true;
         });
 
         zoomPill.setOnClickListener(v -> cycleZoom());
@@ -233,6 +298,8 @@ public class MainActivity extends ComponentActivity {
             prefs.setGridEnabled(gridEnabled);
             updateGridUi();
         });
+
+        doubleExposurePill.setOnClickListener(v -> toggleDoubleExposure());
 
         evSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -250,10 +317,12 @@ public class MainActivity extends ComponentActivity {
 
         viewfinderOverlay.setOnFrameBoundsListener((rect, vw, vh) -> {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dateStampPreview.getLayoutParams();
-            lp.rightMargin = Math.max(0, Math.round(vw - rect.right)) + FilmUiHelper.dp(this, 14);
-            lp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 12);
+            lp.rightMargin = Math.max(0, Math.round(vw - rect.right)) + FilmUiHelper.dp(this, 8);
+            lp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
             dateStampPreview.setLayoutParams(lp);
         });
+
+        previewView.setOnAxisSwapListener(swapped -> updateViewfinderAspectRatio(swapped, false));
 
         previewView.setOnGestureListener(new FilmCameraView.OnGestureListener() {
             @Override
@@ -265,7 +334,54 @@ public class MainActivity extends ComponentActivity {
             public void onPinchZoom(float scaleFactor) {
                 applyPinchZoom(scaleFactor);
             }
+
+            @Override
+            public void onDoubleTapFlip() {
+                if (!capturing) switchLens();
+            }
+
+            @Override
+            public void onSwipeFilm(int direction) {
+                int next = (currentPreset + direction + presets.length) % presets.length;
+                shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                applyPreset(next);
+            }
         });
+    }
+
+    private void initOrientationAndLevelSensors() {
+        orientationListener = new OrientationEventListener(this) {
+            @Override
+            public void onOrientationChanged(int orientation) {
+                if (orientation == ORIENTATION_UNKNOWN) return;
+                int next = CameraTransformMath.quantizeDeviceOrientation(
+                        orientation, deviceSurfaceRotation);
+                if (next != deviceSurfaceRotation) {
+                    deviceSurfaceRotation = next;
+                    if (imageCapture != null) {
+                        imageCapture.setTargetRotation(next);
+                    }
+                }
+            }
+        };
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        if (sensorManager != null) {
+            accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private Display getDisplayCompat() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            Display d = getDisplay();
+            if (d != null) return d;
+        }
+        return getWindowManager().getDefaultDisplay();
+    }
+
+    private int getDisplaySurfaceRotation() {
+        Display d = getDisplayCompat();
+        return d != null ? d.getRotation() : Surface.ROTATION_0;
     }
 
     // ------------------------------------------------------------------ film & UI state
@@ -280,19 +396,27 @@ public class MainActivity extends ComponentActivity {
         previewView.setLightLeakEnabled(lightLeakEnabled);
         previewView.setLeakSeed(leakSeed);
 
-        caption.setText(String.format(Locale.US, "%s  ·  %s", p.name, p.shortNote));
         FilmUiHelper.updateChipSelection(this, chips, index);
         FilmUiHelper.centerChip(filmStripScroll, chips.get(index));
     }
 
+    private void updateViewfinderAspectRatio(boolean axisSwapped, boolean animate) {
+        latestAxisSwapped = axisSwapped;
+        int[] dims = CameraTransformMath.croppedDisplayDimensions(
+                bufferW, bufferH, latestCropL, latestCropT, latestCropR, latestCropB, axisSwapped);
+        if (dims[0] > 0 && dims[1] > 0) {
+            if (previewHost != null) previewHost.setAspectRatio(dims[0], dims[1]);
+            previewView.setAspectRatio(dims[0], dims[1]);
+        }
+        applyAspectRatio(animate);
+    }
+
     private void applyAspectRatio(boolean animate) {
         aspectPill.setText(aspectRatio.label);
-        float sensor = previewView.getSensorAspectRatio();
-        float target = aspectRatio.widthOverHeight;
-        float scaleX = target < sensor ? target / sensor : 1f;
-        float scaleY = target > sensor ? sensor / target : 1f;
-        previewView.setFrameScale(scaleX, scaleY);
-        viewfinderOverlay.setFrameScale(scaleX, scaleY, animate);
+        float[] scales = CameraTransformMath.computeFrameScale(
+                previewView.getSensorAspectRatio(), aspectRatio.widthOverHeight);
+        previewView.setFrameScale(scales[0], scales[1]);
+        viewfinderOverlay.setFrameScale(scales[0], scales[1], animate);
     }
 
     private void updateStampPreview() {
@@ -311,6 +435,51 @@ public class MainActivity extends ComponentActivity {
                 gridEnabled ? R.color.amber_led : R.color.paper, getTheme()));
     }
 
+    private void updateLevelUi() {
+        viewfinderOverlay.setLevelEnabled(levelEnabled);
+        syncLevelSensorRegistration();
+    }
+
+    private void syncLevelSensorRegistration() {
+        if (sensorManager == null || accelerometer == null) return;
+        sensorManager.unregisterListener(levelSensorListener);
+        if (levelEnabled && isActivityResumed) {
+            sensorManager.registerListener(levelSensorListener, accelerometer,
+                    SensorManager.SENSOR_DELAY_UI);
+        }
+    }
+
+    private void updateDoubleExposureUi() {
+        boolean hasGhost = (doubleExposureFirstFrame != null);
+        doubleExposurePill.setColorFilter(getResources().getColor(
+                doubleExposureMode ? R.color.amber_led : R.color.paper, getTheme()));
+        doubleExposurePill.setAlpha((doubleExposureMode || hasGhost) ? 1f : 0.72f);
+        updateRollCounter();
+    }
+
+    private void toggleDoubleExposure() {
+        if (capturing) {
+            toast(R.string.capture_busy);
+            return;
+        }
+        if (doubleExposureFirstFrame != null) {
+            clearDoubleExposureFrame();
+            doubleExposureMode = false;
+        } else {
+            doubleExposureMode = !doubleExposureMode;
+        }
+        shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        updateDoubleExposureUi();
+    }
+
+    private void clearDoubleExposureFrame() {
+        if (doubleExposureFirstFrame != null && !doubleExposureFirstFrame.isRecycled()) {
+            doubleExposureFirstFrame.recycle();
+        }
+        doubleExposureFirstFrame = null;
+        viewfinderOverlay.setDoubleExposureGhost(null);
+    }
+
     private void updateTimerUi() {
         if (timerSeconds > 0) {
             timerIcon.setVisibility(View.GONE);
@@ -324,8 +493,12 @@ public class MainActivity extends ComponentActivity {
 
     private void updateRollCounter() {
         int frameInRoll = Math.min(exposures, CameraPrefs.FRAMES_PER_ROLL);
-        rollCounter.setText(String.format(Locale.US,
-                "R%02d · %02d / %02d", rollNumber, frameInRoll, CameraPrefs.FRAMES_PER_ROLL));
+        String text = String.format(Locale.US,
+                "R%02d · %02d/%02d", rollNumber, frameInRoll, CameraPrefs.FRAMES_PER_ROLL);
+        if (doubleExposureMode) {
+            text = text + (doubleExposureFirstFrame != null ? " · 2/2" : " · 1/2");
+        }
+        rollCounter.setText(text);
     }
 
     private void cycleTimer() {
@@ -351,16 +524,28 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void switchLens() {
+        if (capturing) {
+            toast(R.string.capture_busy);
+            return;
+        }
+        cancelCountdown();
         facingFront = !facingFront;
         SurfaceTexture st = previewView.getSurfaceTexture();
         if (st != null) bindCamera(st);
     }
 
     private void openDarkroomSheet() {
+        if (capturing) {
+            toast(R.string.capture_busy);
+            return;
+        }
         DarkroomSheet.show(this, prefs, new DarkroomSheet.Callbacks() {
             @Override
             public void onAspectChanged(CameraPrefs.AspectRatio ratio) {
+                if (capturing) return;
                 aspectRatio = ratio;
+                clearDoubleExposureFrame();
+                updateDoubleExposureUi();
                 applyAspectRatio(true);
             }
 
@@ -388,9 +573,9 @@ public class MainActivity extends ComponentActivity {
             }
 
             @Override
-            public void onGridChanged(boolean enabled) {
-                gridEnabled = enabled;
-                updateGridUi();
+            public void onLevelChanged(boolean enabled) {
+                levelEnabled = enabled;
+                updateLevelUi();
             }
 
             @Override
@@ -401,6 +586,7 @@ public class MainActivity extends ComponentActivity {
             @Override
             public void onFrontMirrorChanged(boolean enabled) {
                 frontMirrorEnabled = enabled;
+                pushPreviewTransform();
             }
 
             @Override
@@ -442,27 +628,35 @@ public class MainActivity extends ComponentActivity {
         else if (manualRotation == 180) manualRotation = 270;
         else manualRotation = -1;
         prefs.setManualRotation(manualRotation);
-        applyTransform(autoDegrees, facingFront);
+        pushPreviewTransform();
     }
 
-    private void applyTransform(int cameraDegrees, boolean mirrored) {
-        autoDegrees = cameraDegrees;
-        int degrees = manualRotation >= 0 ? manualRotation : cameraDegrees;
-        boolean quarterTurn = (degrees % 180 != 0);
-        previewView.setCameraTransform(degrees, mirrored);
-        previewView.setAspectRatio(quarterTurn ? bufferH : bufferW,
-                quarterTurn ? bufferW : bufferH);
-        previewView.post(() -> applyAspectRatio(false));
+    private void pushPreviewTransform() {
+        int displayDeg = CameraTransformMath.surfaceRotationToDegrees(getDisplaySurfaceRotation());
+        int manualOffset = manualRotation > 0 ? manualRotation : 0;
+        boolean extraMirror = facingFront && !frontMirrorEnabled;
+        previewView.setCameraTransform(
+                latestHasCameraTransform,
+                latestInfoRotation,
+                latestInfoMirroring,
+                latestCropL,
+                latestCropT,
+                latestCropR,
+                latestCropB,
+                displayDeg,
+                manualOffset,
+                extraMirror);
     }
 
     // ------------------------------------------------------------------ focus, zoom, EV
 
     private void triggerTapFocus(float viewX, float viewY, int vw, int vh) {
+        if (!viewfinderOverlay.isPointInActiveFrame(viewX, viewY)) return;
         viewfinderOverlay.showFocusAt(viewX, viewY);
         viewfinderOverlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
         if (camera == null) return;
-        MeteringPoint point = new SurfaceOrientedMeteringPointFactory(vw, vh)
-                .createPoint(viewX, viewY);
+        MeteringPoint point = new DisplayOrientedMeteringPointFactory(
+                getDisplayCompat(), camera.getCameraInfo(), vw, vh).createPoint(viewX, viewY);
         FocusMeteringAction action = new FocusMeteringAction.Builder(point)
                 .setAutoCancelDuration(3, TimeUnit.SECONDS)
                 .build();
@@ -578,40 +772,50 @@ public class MainActivity extends ComponentActivity {
         bindCamera(st);
     }
 
+    private boolean isActivityResumed = false;
+    private float savedWindowBrightness = -2f;
+
     @SuppressWarnings("deprecation")
     private void bindCamera(SurfaceTexture st) {
+        final int gen = bindGeneration.incrementAndGet();
+        final boolean wantFront = facingFront;
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
+            if (gen != bindGeneration.get() || isDestroyed() || isFinishing()) {
+                return;
+            }
             try {
                 cameraProvider = future.get();
-                int rotation = getWindowManager().getDefaultDisplay().getRotation();
+                int displayRotation = getDisplaySurfaceRotation();
                 CameraSelector selector = new CameraSelector.Builder()
-                        .requireLensFacing(facingFront ? CameraSelector.LENS_FACING_FRONT
+                        .requireLensFacing(wantFront ? CameraSelector.LENS_FACING_FRONT
                                 : CameraSelector.LENS_FACING_BACK)
                         .build();
                 Preview preview = new Preview.Builder()
                         .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                        .setTargetRotation(rotation)
+                        .setTargetRotation(displayRotation)
                         .build();
                 imageCapture = new ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                         .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                        .setTargetRotation(rotation)
+                        .setTargetRotation(deviceSurfaceRotation)
                         .build();
 
                 cameraProvider.unbindAll();
                 camera = cameraProvider.bindToLifecycle(this, selector, preview, imageCapture);
                 imageCapture.setFlashMode(flashMode);
                 setupCameraControlsUi();
-                preview.setSurfaceProvider(cameraExecutor, request -> provideSurface(request, st));
+                preview.setSurfaceProvider(cameraExecutor,
+                        request -> provideSurface(request, st, wantFront, gen));
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(this,
-                        "相机启动失败: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                        getString(R.string.camera_start_failed, String.valueOf(e.getMessage())),
+                        Toast.LENGTH_LONG).show());
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void provideSurface(SurfaceRequest request, SurfaceTexture st) {
+    private void provideSurface(SurfaceRequest request, SurfaceTexture st, boolean lensFront, int gen) {
         Size size = request.getResolution();
         int w = size.getWidth();
         int h = size.getHeight();
@@ -619,9 +823,51 @@ public class MainActivity extends ComponentActivity {
         bufferW = w;
         bufferH = h;
 
-        applyTransform(90, facingFront);
-        request.setTransformationInfoListener(cameraExecutor,
-                info -> applyTransform(info.getRotationDegrees(), facingFront));
+        int displayRot = getDisplaySurfaceRotation();
+        int fallbackRot = (displayRot == Surface.ROTATION_90 || displayRot == Surface.ROTATION_270)
+                ? 0 : 90;
+        latestHasCameraTransform = true;
+        latestInfoRotation = fallbackRot;
+        latestInfoMirroring = lensFront;
+        latestCropL = 0f;
+        latestCropT = 0f;
+        latestCropR = 1f;
+        latestCropB = 1f;
+        autoDegrees = fallbackRot;
+        pushPreviewTransform();
+        runOnUiThread(() -> {
+            if (gen != bindGeneration.get()) return;
+            int manualOff = manualRotation > 0 ? manualRotation : 0;
+            boolean quarter = ((fallbackRot + manualOff) % 180 != 0);
+            updateViewfinderAspectRatio(quarter, false);
+        });
+
+        request.setTransformationInfoListener(cameraExecutor, info -> {
+            if (gen != bindGeneration.get()) return;
+            latestHasCameraTransform = info.hasCameraTransform();
+            latestInfoRotation = info.getRotationDegrees();
+            latestInfoMirroring = info.isMirroring();
+            Rect crop = info.getCropRect();
+            if (crop != null && bufferW > 0 && bufferH > 0 && !crop.isEmpty()) {
+                latestCropL = (float) crop.left / bufferW;
+                latestCropT = (float) crop.top / bufferH;
+                latestCropR = (float) crop.right / bufferW;
+                latestCropB = (float) crop.bottom / bufferH;
+            } else {
+                latestCropL = 0f;
+                latestCropT = 0f;
+                latestCropR = 1f;
+                latestCropB = 1f;
+            }
+            autoDegrees = info.getRotationDegrees();
+            pushPreviewTransform();
+            int manualOff = manualRotation > 0 ? manualRotation : 0;
+            boolean quarter = ((latestInfoRotation + manualOff) % 180 != 0);
+            runOnUiThread(() -> {
+                if (gen != bindGeneration.get()) return;
+                updateViewfinderAspectRatio(quarter, false);
+            });
+        });
 
         Surface surface = new Surface(st);
         request.provideSurface(surface, cameraExecutor, result -> surface.release());
@@ -680,6 +926,29 @@ public class MainActivity extends ComponentActivity {
         countdownText.setVisibility(View.GONE);
     }
 
+    private void beginScreenFlash() {
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        if (savedWindowBrightness < -1.5f) {
+            savedWindowBrightness = lp.screenBrightness;
+        }
+        lp.screenBrightness = 1.0f;
+        getWindow().setAttributes(lp);
+        flashOverlay.setBackgroundColor(Color.parseColor("#FFF4E2"));
+        flashOverlay.animate().cancel();
+        flashOverlay.setAlpha(0f);
+        flashOverlay.animate().alpha(0.95f).setDuration(75).start();
+    }
+
+    private void endScreenFlash() {
+        if (savedWindowBrightness >= -1.5f) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = savedWindowBrightness;
+            getWindow().setAttributes(lp);
+            savedWindowBrightness = -2f;
+        }
+        flashOverlay.animate().alpha(0f).setDuration(220).start();
+    }
+
     private void captureNow() {
         if (capturing || imageCapture == null) return;
         capturing = true;
@@ -695,10 +964,31 @@ public class MainActivity extends ComponentActivity {
         shutterCore.animate().scaleX(0.84f).scaleY(0.84f).setDuration(80)
                 .withEndAction(() -> shutterCore.animate().scaleX(1f).scaleY(1f)
                         .setDuration(160).start()).start();
-        flashOverlay.setAlpha(0f);
-        flashOverlay.animate().alpha(0.78f).setDuration(55)
-                .withEndAction(() -> flashOverlay.animate().alpha(0f).setDuration(240).start())
-                .start();
+
+        final boolean useScreenFlash = facingFront && flashMode == ImageCapture.FLASH_MODE_ON;
+        final boolean shotDoubleExposure = doubleExposureMode;
+        final Bitmap firstFrameSnapshot = doubleExposureFirstFrame;
+
+        if (useScreenFlash) {
+            beginScreenFlash();
+            previewView.postDelayed(
+                    () -> executeImageCapture(shotDoubleExposure, firstFrameSnapshot, true),
+                    120L);
+        } else {
+            viewfinderOverlay.triggerShutterEffect();
+            executeImageCapture(shotDoubleExposure, firstFrameSnapshot, false);
+        }
+    }
+
+    private void executeImageCapture(
+            final boolean shotDoubleExposure,
+            final Bitmap firstFrameSnapshot,
+            final boolean usedScreenFlash) {
+        if (isDestroyed() || isFinishing() || imageCapture == null) {
+            if (usedScreenFlash) endScreenFlash();
+            capturing = false;
+            return;
+        }
 
         final FilmPreset preset = presets[currentPreset];
         final CameraPrefs.AspectRatio shotAspect = aspectRatio;
@@ -707,48 +997,100 @@ public class MainActivity extends ComponentActivity {
         final boolean boostGrain = grainBoost;
         final boolean useLeak = lightLeakEnabled;
         final float shotLeakSeed = leakSeed;
-        final boolean mirrorSelfie = facingFront && frontMirrorEnabled;
+        final boolean shotFacingFront = facingFront;
+        final boolean mirrorSelfie = CameraTransformMath.shouldMirrorCapture(
+                shotFacingFront, frontMirrorEnabled);
+        final int shotTargetRotation = deviceSurfaceRotation;
+        final boolean shotLandscape = (shotTargetRotation == Surface.ROTATION_90
+                || shotTargetRotation == Surface.ROTATION_270);
         final int nextFrame = (exposures % CameraPrefs.FRAMES_PER_ROLL) + 1;
 
+        imageCapture.setTargetRotation(shotTargetRotation);
         imageCapture.takePicture(cameraExecutor, new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy image) {
                 try {
-                    byte[] jpeg = readJpeg(image);
-                    int proxyRotation = image.getImageInfo().getRotationDegrees();
-                    int exifDeg = exifRotation(jpeg);
-                    image.close();
+                    byte[] jpeg;
+                    int proxyRotation;
+                    try {
+                        jpeg = readJpeg(image);
+                        proxyRotation = image.getImageInfo().getRotationDegrees();
+                    } finally {
+                        image.close();
+                    }
+                    int[] exifTx = exifOrientationTransform(jpeg);
 
                     Bitmap source = decode(jpeg, MAX_PHOTO_EDGE);
                     if (source == null) throw new IllegalStateException("Cannot decode capture");
-                    int rotation = exifDeg != 0 ? exifDeg : proxyRotation;
-                    if (rotation == 0 && source.getWidth() > source.getHeight()
-                            && manualRotation < 0 && (autoDegrees % 180 != 0)) {
-                        // Fallback if a device HAL strips both EXIF orientation and
-                        // ImageInfo rotation while returning an unrotated sensor JPEG.
-                        rotation = autoDegrees;
+                    int rotation = CameraTransformMath.resolveCaptureRotation(
+                            exifTx[0],
+                            proxyRotation,
+                            source.getWidth(),
+                            source.getHeight(),
+                            shotTargetRotation,
+                            autoDegrees,
+                            manualRotation);
+                    Bitmap oriented = transformBitmap(source, rotation, exifTx[1] != 0, mirrorSelfie);
+                    Bitmap cropped = PhotoSaver.cropToAspect(oriented, shotAspect, shotLandscape);
+
+                    if (shotDoubleExposure && firstFrameSnapshot == null) {
+                        int gw = Math.min(720, cropped.getWidth());
+                        int gh = Math.max(1, Math.round(
+                                (float) cropped.getHeight() * gw / Math.max(1, cropped.getWidth())));
+                        Bitmap ghost = Bitmap.createScaledBitmap(cropped, gw, gh, true);
+                        if (ghost == cropped) {
+                            ghost = cropped.copy(Bitmap.Config.ARGB_8888, false);
+                        }
+                        final Bitmap finalGhost = ghost;
+                        runOnUiThread(() -> {
+                            if (usedScreenFlash) endScreenFlash();
+                            if (isDestroyed() || isFinishing()) {
+                                cropped.recycle();
+                                finalGhost.recycle();
+                                capturing = false;
+                                return;
+                            }
+                            doubleExposureFirstFrame = cropped;
+                            viewfinderOverlay.setDoubleExposureGhost(finalGhost);
+                            updateDoubleExposureUi();
+                            capturing = false;
+                        });
+                        return;
                     }
-                    Bitmap rotated = rotate(source, rotation);
-                    if (mirrorSelfie) {
-                        rotated = PhotoSaver.flipHorizontal(rotated);
+
+                    Bitmap developedInput = cropped;
+                    if (shotDoubleExposure && firstFrameSnapshot != null) {
+                        Bitmap blended = PhotoSaver.blendDoubleExposure(firstFrameSnapshot, cropped);
+                        if (blended != cropped) cropped.recycle();
+                        developedInput = blended;
                     }
-                    Bitmap cropped = PhotoSaver.cropToAspect(rotated, shotAspect);
+
                     Bitmap filtered = previewView.renderPhoto(
-                            cropped, preset, boostGrain, useLeak, shotLeakSeed);
-                    if (filtered != cropped) cropped.recycle();
+                            developedInput, preset, boostGrain, useLeak, shotLeakSeed);
+                    if (filtered != developedInput) developedInput.recycle();
 
                     Bitmap print = PhotoSaver.applyPaper(
                             filtered, preset, shotPaper, shotDate, shotAspect, nextFrame, null);
                     if (print != filtered) filtered.recycle();
 
-                    Uri savedUri = PhotoSaver.save(MainActivity.this, print);
+                    Uri savedUri = PhotoSaver.save(MainActivity.this, print, jpeg);
                     int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
                     Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
                     print.recycle();
 
-                    runOnUiThread(() -> onPhotoSaved(savedUri, thumb));
+                    final boolean clearDouble = (firstFrameSnapshot != null);
+                    runOnUiThread(() -> {
+                        if (usedScreenFlash) endScreenFlash();
+                        if (clearDouble) {
+                            clearDoubleExposureFrame();
+                            doubleExposureMode = false;
+                            updateDoubleExposureUi();
+                        }
+                        onPhotoSaved(savedUri, thumb);
+                    });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
+                        if (usedScreenFlash) endScreenFlash();
                         toast(R.string.save_failed);
                         Toast.makeText(MainActivity.this, String.valueOf(e.getMessage()),
                                 Toast.LENGTH_LONG).show();
@@ -761,9 +1103,11 @@ public class MainActivity extends ComponentActivity {
             @Override
             public void onError(@NonNull ImageCaptureException exception) {
                 runOnUiThread(() -> {
+                    if (usedScreenFlash) endScreenFlash();
                     capturing = false;
                     Toast.makeText(MainActivity.this,
-                            "拍摄失败: " + exception.getMessage(), Toast.LENGTH_LONG).show();
+                            getString(R.string.capture_failed, String.valueOf(exception.getMessage())),
+                            Toast.LENGTH_LONG).show();
                 });
             }
         });
@@ -834,7 +1178,9 @@ public class MainActivity extends ComponentActivity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
                 && permissionGate.getVisibility() != View.VISIBLE) {
-            takePhoto();
+            if (event.getRepeatCount() == 0) {
+                takePhoto();
+            }
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -849,17 +1195,15 @@ public class MainActivity extends ComponentActivity {
         return bytes;
     }
 
-    private static int exifRotation(byte[] jpeg) {
+    private static int[] exifOrientationTransform(byte[] jpeg) {
         try {
             ExifInterface exif = new ExifInterface(new ByteArrayInputStream(jpeg));
             int o = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL);
-            if (o == ExifInterface.ORIENTATION_ROTATE_90) return 90;
-            if (o == ExifInterface.ORIENTATION_ROTATE_180) return 180;
-            if (o == ExifInterface.ORIENTATION_ROTATE_270) return 270;
+            return CameraTransformMath.exifOrientationToTransform(o);
         } catch (Exception ignored) {
         }
-        return 0;
+        return new int[]{0, 0};
     }
 
     private static Bitmap decode(byte[] jpeg, int maxEdge) {
@@ -877,10 +1221,14 @@ public class MainActivity extends ComponentActivity {
         return PhotoSaver.capEdge(decoded, maxEdge);
     }
 
-    private static Bitmap rotate(Bitmap src, int degrees) {
-        if (degrees == 0) return src;
+    private static Bitmap transformBitmap(
+            Bitmap src, int cwDegrees, boolean flipHBeforeRotate, boolean flipHAfterRotate) {
+        if (src == null) return null;
+        if (cwDegrees == 0 && !flipHBeforeRotate && !flipHAfterRotate) return src;
         Matrix m = new Matrix();
-        m.postRotate(degrees);
+        if (flipHBeforeRotate) m.postScale(-1f, 1f);
+        if (cwDegrees != 0) m.postRotate(cwDegrees);
+        if (flipHAfterRotate) m.postScale(-1f, 1f);
         Bitmap out = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), m, true);
         if (out != src) src.recycle();
         return out;
@@ -895,13 +1243,26 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        isActivityResumed = true;
         previewView.onResume();
+        if (orientationListener != null && orientationListener.canDetectOrientation()) {
+            orientationListener.enable();
+        }
+        syncLevelSensorRegistration();
         refreshThumbnailAsync();
     }
 
     @Override
     protected void onPause() {
+        isActivityResumed = false;
         cancelCountdown();
+        endScreenFlash();
+        if (orientationListener != null) {
+            orientationListener.disable();
+        }
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(levelSensorListener);
+        }
         previewView.onPause();
         super.onPause();
     }
@@ -910,6 +1271,9 @@ public class MainActivity extends ComponentActivity {
     protected void onDestroy() {
         super.onDestroy();
         cancelCountdown();
+        if (!capturing) {
+            clearDoubleExposureFrame();
+        }
         MediaActionSound sound = shutterSound;
         shutterSound = null;
         if (sound != null) {

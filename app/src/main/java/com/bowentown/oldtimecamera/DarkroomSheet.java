@@ -27,7 +27,7 @@ public final class DarkroomSheet {
         void onDateModeChanged(CameraPrefs.DateMode mode);
         void onGrainBoostChanged(boolean enabled);
         void onLightLeakChanged(boolean enabled);
-        void onGridChanged(boolean enabled);
+        void onLevelChanged(boolean enabled);
         void onShutterSoundChanged(boolean enabled);
         void onFrontMirrorChanged(boolean enabled);
         int onCycleRotation();
@@ -103,9 +103,9 @@ public final class DarkroomSheet {
             prefs.setLightLeakEnabled(enabled);
             callbacks.onLightLeakChanged(enabled);
         }, true);
-        addToggle(context, toggleContainer, R.string.grid_overlay, prefs.isGridEnabled(), enabled -> {
-            prefs.setGridEnabled(enabled);
-            callbacks.onGridChanged(enabled);
+        addToggle(context, toggleContainer, R.string.level_overlay, prefs.isLevelEnabled(), enabled -> {
+            prefs.setLevelEnabled(enabled);
+            callbacks.onLevelChanged(enabled);
         }, true);
         addToggle(context, toggleContainer, R.string.shutter_sound, prefs.isShutterSoundEnabled(), enabled -> {
             prefs.setShutterSoundEnabled(enabled);
@@ -145,7 +145,7 @@ public final class DarkroomSheet {
             tv.setText(labels[i]);
             tv.setGravity(Gravity.CENTER);
             tv.setTypeface(Typeface.MONOSPACE);
-            tv.setTextSize(10.5f);
+            tv.setTextSize(labels.length >= 5 ? 9.5f : 10.5f);
             tv.setSingleLine(true);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);

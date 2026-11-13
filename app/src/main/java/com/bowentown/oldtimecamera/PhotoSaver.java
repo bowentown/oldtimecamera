@@ -59,26 +59,127 @@ public final class PhotoSaver {
         return new SimpleDateFormat("yy MM dd", Locale.US).format(now);
     }
 
+    /**
+     * Pure integer crop rectangle {@code [left, top, cropW, cropH]} centered on a
+     * {@code w x h} image to achieve {@code targetRatio} ({@code width / height}).
+     */
+    public static int[] computeCropBounds(int w, int h, float targetRatio) {
+        if (w <= 0 || h <= 0) {
+            return new int[]{0, 0, 0, 0};
+        }
+        if (targetRatio <= 0f) {
+            return new int[]{0, 0, w, h};
+        }
+        float current = (float) w / (float) h;
+        if (Math.abs(current - targetRatio) < 0.015f) {
+            return new int[]{0, 0, w, h};
+        }
+        int cropW = w;
+        int cropH = h;
+        int x = 0;
+        int y = 0;
+        if (current > targetRatio) {
+            cropW = Math.max(1, Math.min(w, Math.round(h * targetRatio)));
+            x = (w - cropW) / 2;
+        } else {
+            cropH = Math.max(1, Math.min(h, Math.round(w / targetRatio)));
+            y = (h - cropH) / 2;
+        }
+        return new int[]{x, y, cropW, cropH};
+    }
+
+    /**
+     * Resolves effective {@code width / height} crop ratio for captured prints.
+     * When the photographer holds a portrait-locked viewfinder horizontally
+     * ({@code landscapeCapture == true}), portrait ratios like {@code 3:4} and {@code 2:3}
+     * flip to {@code 4:3} and {@code 3:2}, whereas wide cinema ratios ({@code 16:9},
+     * {@code XPAN}) remain landscape.
+     */
+    public static float effectiveCropRatio(CameraPrefs.AspectRatio ratio, boolean landscapeCapture) {
+        if (ratio == null) return 3f / 4f;
+        if (landscapeCapture && ratio.widthOverHeight < 1f) {
+            return 1f / ratio.widthOverHeight;
+        }
+        return ratio.widthOverHeight;
+    }
+
     public static Bitmap cropToAspect(Bitmap src, CameraPrefs.AspectRatio ratio) {
+        return cropToAspect(src, ratio, src != null && src.getWidth() > src.getHeight());
+    }
+
+    public static Bitmap cropToAspect(Bitmap src, CameraPrefs.AspectRatio ratio, boolean landscapeCapture) {
         if (src == null || ratio == null) return src;
         int w = src.getWidth();
         int h = src.getHeight();
-        float current = (float) w / (float) h;
-        float target = ratio.widthOverHeight;
-        if (Math.abs(current - target) < 0.015f) return src;
-
-        int cropW = w;
-        int cropH = h;
-        if (current > target) {
-            cropW = Math.max(1, Math.round(h * target));
-        } else {
-            cropH = Math.max(1, Math.round(w / target));
+        float target = effectiveCropRatio(ratio, landscapeCapture);
+        int[] bounds = computeCropBounds(w, h, target);
+        if (bounds[0] == 0 && bounds[1] == 0 && bounds[2] == w && bounds[3] == h) {
+            return src;
         }
-        int x = Math.max(0, (w - cropW) / 2);
-        int y = Math.max(0, (h - cropH) / 2);
-        Bitmap cropped = Bitmap.createBitmap(src, x, y, cropW, cropH);
+
+        Bitmap cropped = Bitmap.createBitmap(src, bounds[0], bounds[1], bounds[2], bounds[3]);
         if (cropped != src) src.recycle();
         return cropped;
+    }
+
+    /**
+     * Pure Screen-blend math on packed ARGB_8888 pixel arrays for analog double exposure:
+     * {@code 1 - (1 - a) * (1 - b)}.
+     */
+    public static int[] blendScreenPixels(int[] firstArgb, int[] secondArgb) {
+        if (firstArgb == null || secondArgb == null) return null;
+        int len = Math.min(firstArgb.length, secondArgb.length);
+        int[] out = new int[len];
+        for (int i = 0; i < len; i++) {
+            int p1 = firstArgb[i];
+            int p2 = secondArgb[i];
+            int a = Math.max((p1 >>> 24) & 0xFF, (p2 >>> 24) & 0xFF);
+            int r1 = (p1 >>> 16) & 0xFF;
+            int g1 = (p1 >>> 8) & 0xFF;
+            int b1 = p1 & 0xFF;
+            int r2 = (p2 >>> 16) & 0xFF;
+            int g2 = (p2 >>> 8) & 0xFF;
+            int b2 = p2 & 0xFF;
+
+            int r = 255 - ((255 - r1) * (255 - r2) + 127) / 255;
+            int g = 255 - ((255 - g1) * (255 - g2) + 127) / 255;
+            int b = 255 - ((255 - b1) * (255 - b2) + 127) / 255;
+            out[i] = (a << 24) | (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
+        }
+        return out;
+    }
+
+    /** Blends two aligned camera frames using analog Screen double-exposure compositing. */
+    public static Bitmap blendDoubleExposure(Bitmap first, Bitmap second) {
+        if (first == null || second == null) return second != null ? second : first;
+        int w = second.getWidth();
+        int h = second.getHeight();
+        Bitmap preparedFirst = first;
+        if (first.getWidth() != w || first.getHeight() != h) {
+            int[] bounds = computeCropBounds(first.getWidth(), first.getHeight(), (float) w / (float) h);
+            Bitmap croppedFirst = (bounds[0] == 0 && bounds[1] == 0
+                    && bounds[2] == first.getWidth() && bounds[3] == first.getHeight())
+                    ? first
+                    : Bitmap.createBitmap(first, bounds[0], bounds[1], bounds[2], bounds[3]);
+            preparedFirst = (croppedFirst.getWidth() == w && croppedFirst.getHeight() == h)
+                    ? croppedFirst
+                    : Bitmap.createScaledBitmap(croppedFirst, w, h, true);
+            if (croppedFirst != first && croppedFirst != preparedFirst) {
+                croppedFirst.recycle();
+            }
+        }
+
+        int[] px1 = new int[w * h];
+        int[] px2 = new int[w * h];
+        preparedFirst.getPixels(px1, 0, w, 0, 0, w, h);
+        second.getPixels(px2, 0, w, 0, 0, w, h);
+        if (preparedFirst != first) {
+            preparedFirst.recycle();
+        }
+        int[] blended = blendScreenPixels(px1, px2);
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        out.setPixels(blended, 0, w, 0, 0, w, h);
+        return out;
     }
 
     public static Bitmap flipHorizontal(Bitmap src) {
@@ -103,6 +204,36 @@ public final class PhotoSaver {
         return scaled;
     }
 
+    /**
+     * Pure print geometry {@code [pad, footer, outW, outH]} scaled off the short side so
+     * ultra-wide ({@code XPAN}, {@code 16:9}) and landscape prints avoid excessive footers.
+     */
+    public static int[] computePaperGeometry(int photoW, int photoH,
+                                             CameraPrefs.PaperStyle paperStyle,
+                                             CameraPrefs.AspectRatio aspect) {
+        if (photoW <= 0 || photoH <= 0) return new int[]{0, 0, 0, 0};
+        boolean hasFrame = paperStyle != null && paperStyle != CameraPrefs.PaperStyle.NONE;
+        if (!hasFrame) return new int[]{0, 0, photoW, photoH};
+
+        int shortSide = Math.min(photoW, photoH);
+        float padRatio;
+        float footerRatio;
+        if (aspect == CameraPrefs.AspectRatio.RATIO_1_1) {
+            padRatio = 0.055f;
+            footerRatio = 0.185f;
+        } else if (aspect == CameraPrefs.AspectRatio.RATIO_XPAN
+                || aspect == CameraPrefs.AspectRatio.RATIO_16_9) {
+            padRatio = 0.045f;
+            footerRatio = 0.135f;
+        } else {
+            padRatio = 0.036f;
+            footerRatio = 0.115f;
+        }
+        int pad = Math.round(shortSide * padRatio);
+        int footer = Math.round(shortSide * footerRatio);
+        return new int[]{pad, footer, photoW + pad * 2, photoH + pad * 2 + footer};
+    }
+
     /** Adds the selected print border, frame badge, optional note, and LED date stamp. */
     public static Bitmap applyPaper(Bitmap photo, FilmPreset preset,
                                     CameraPrefs.PaperStyle paperStyle,
@@ -117,12 +248,11 @@ public final class PhotoSaver {
 
         int w = photo.getWidth();
         int h = photo.getHeight();
-        int pad = hasFrame ? Math.round(w * (aspect == CameraPrefs.AspectRatio.RATIO_1_1 ? 0.055f : 0.036f)) : 0;
-        int footer = hasFrame
-                ? Math.round(w * (aspect == CameraPrefs.AspectRatio.RATIO_1_1 ? 0.185f : 0.115f))
-                : 0;
-        int outW = w + pad * 2;
-        int outH = h + pad * 2 + footer;
+        int[] geo = computePaperGeometry(w, h, paperStyle, aspect);
+        int pad = geo[0];
+        int footer = geo[1];
+        int outW = geo[2];
+        int outH = geo[3];
 
         Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
@@ -155,7 +285,6 @@ public final class PhotoSaver {
 
         if (hasFrame) {
             int inkColor = darkPaper ? 0xFFB0A695 : 0xFF7D705C;
-            int mutedColor = darkPaper ? 0xFF787063 : 0xFFA29682;
             float baseY = outH - footer * (aspect == CameraPrefs.AspectRatio.RATIO_1_1 ? 0.42f : 0.37f);
 
             paint.setTextAlign(Paint.Align.LEFT);
@@ -173,11 +302,6 @@ public final class PhotoSaver {
                 paint.setTextSize(w * 0.025f);
                 if (note.length() > 36) note = note.substring(0, 35) + "…";
                 canvas.drawText(note, pad + w * 0.99f, baseY, paint);
-            } else {
-                paint.setTextAlign(Paint.Align.RIGHT);
-                paint.setColor(mutedColor);
-                paint.setTextSize(w * 0.021f);
-                canvas.drawText("OLD TIME CAMERA", pad + w * 0.99f, baseY, paint);
             }
         }
         return out;
@@ -233,7 +357,7 @@ public final class PhotoSaver {
         textPaint.setTypeface(Typeface.MONOSPACE);
         textPaint.setColor(0xFFF0E8D8);
         textPaint.setTextSize(26f);
-        canvas.drawText(String.format(Locale.US, "OLD TIME 400  ·  ROLL %02d  ·  CONTACT SHEET", rollNumber),
+        canvas.drawText(String.format(Locale.US, "ROLL %02d  ·  CONTACT SHEET", rollNumber),
                 outerPad, perfBand + 54f, textPaint);
 
         textPaint.setTextAlign(Paint.Align.RIGHT);
@@ -276,18 +400,7 @@ public final class PhotoSaver {
             textPaint.setTextSize(20f);
             canvas.drawText(String.format(Locale.US, "%02dA", i + 1),
                     left + 4f, top + cellH + 24f, textPaint);
-
-            textPaint.setTextAlign(Paint.Align.RIGHT);
-            textPaint.setColor(0xFF7E7466);
-            textPaint.setTextSize(18f);
-            canvas.drawText("SAFETY FILM", left + cellW - 4f, top + cellH + 24f, textPaint);
         }
-
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setColor(0xFF8C8273);
-        textPaint.setTextSize(19f);
-        canvas.drawText("OLD TIME CAMERA  ·  ARCHIVAL PRINT",
-                sheetW * 0.5f, sheetH - perfBand - 16f, textPaint);
 
         Uri saved = save(context, out);
         out.recycle();
@@ -295,47 +408,127 @@ public final class PhotoSaver {
     }
 
     public static Uri save(Context context, Bitmap bitmap) throws IOException {
+        return save(context, bitmap, null);
+    }
+
+    public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg) throws IOException {
         String name = "OTC_"
                 + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date())
                 + ".jpg";
         ContentResolver resolver = context.getContentResolver();
 
-        if (Build.VERSION.SDK_INT >= 29) {
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-            values.put(MediaStore.Images.Media.RELATIVE_PATH,
-                    Environment.DIRECTORY_PICTURES + "/OldTimeCamera");
-            values.put(MediaStore.Images.Media.IS_PENDING, 1);
-            Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-            if (uri == null) throw new IOException("MediaStore insert failed");
-            try (OutputStream os = resolver.openOutputStream(uri)) {
-                if (os == null) throw new IOException("Cannot open output stream");
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
+        File cacheDir = context.getCacheDir();
+        File tempFile = null;
+        if (cacheDir != null) {
+            tempFile = File.createTempFile("otc_print_", ".jpg", cacheDir);
+        }
+
+        try {
+            if (tempFile != null) {
+                try (OutputStream tos = new FileOutputStream(tempFile)) {
+                    if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, tos)) {
+                        throw new IOException("JPEG compression failed");
+                    }
+                }
+                applyAnalogExif(tempFile, sourceExifJpeg);
+            }
+
+            if (Build.VERSION.SDK_INT >= 29) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/OldTimeCamera");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new IOException("MediaStore insert failed");
+                try (OutputStream os = resolver.openOutputStream(uri)) {
+                    if (os == null) throw new IOException("Cannot open output stream");
+                    if (tempFile != null) {
+                        copyFileToStream(tempFile, os);
+                    } else if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
+                        throw new IOException("JPEG compression failed");
+                    }
+                }
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(uri, values, null, null);
+                return uri;
+            }
+
+            File dir = new File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "OldTimeCamera");
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw new IOException("Cannot create album directory");
+            }
+            File file = new File(dir, name);
+            try (OutputStream os = new FileOutputStream(file)) {
+                if (tempFile != null) {
+                    copyFileToStream(tempFile, os);
+                } else if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
                     throw new IOException("JPEG compression failed");
                 }
             }
-            values.clear();
-            values.put(MediaStore.Images.Media.IS_PENDING, 0);
-            resolver.update(uri, values, null, null);
-            return uri;
-        }
-
-        File dir = new File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "OldTimeCamera");
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new IOException("Cannot create album directory");
-        }
-        File file = new File(dir, name);
-        try (OutputStream os = new FileOutputStream(file)) {
-            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
-                throw new IOException("JPEG compression failed");
+            if (tempFile == null) {
+                applyAnalogExif(file, sourceExifJpeg);
+            }
+            MediaScannerConnection.scanFile(context,
+                    new String[]{file.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
+            return Uri.fromFile(file);
+        } finally {
+            if (tempFile != null && tempFile.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                tempFile.delete();
             }
         }
-        MediaScannerConnection.scanFile(context,
-                new String[]{file.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
-        return Uri.fromFile(file);
+    }
+
+    private static void copyFileToStream(File src, OutputStream os) throws IOException {
+        byte[] buf = new byte[16384];
+        try (java.io.InputStream is = new java.io.FileInputStream(src)) {
+            int n;
+            while ((n = is.read(buf)) >= 0) {
+                if (n > 0) os.write(buf, 0, n);
+            }
+        }
+    }
+
+    private static void applyAnalogExif(File outFile, byte[] sourceExifJpeg) {
+        try {
+            android.media.ExifInterface outExif =
+                    new android.media.ExifInterface(outFile.getAbsolutePath());
+            if (sourceExifJpeg != null && sourceExifJpeg.length > 0) {
+                android.media.ExifInterface src = new android.media.ExifInterface(
+                        new java.io.ByteArrayInputStream(sourceExifJpeg));
+                String[] tags = {
+                        android.media.ExifInterface.TAG_MAKE,
+                        android.media.ExifInterface.TAG_MODEL,
+                        android.media.ExifInterface.TAG_DATETIME,
+                        android.media.ExifInterface.TAG_DATETIME_ORIGINAL,
+                        android.media.ExifInterface.TAG_DATETIME_DIGITIZED,
+                        android.media.ExifInterface.TAG_EXPOSURE_TIME,
+                        android.media.ExifInterface.TAG_F_NUMBER,
+                        android.media.ExifInterface.TAG_ISO_SPEED_RATINGS,
+                        android.media.ExifInterface.TAG_FOCAL_LENGTH,
+                        android.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+                        android.media.ExifInterface.TAG_WHITE_BALANCE,
+                        android.media.ExifInterface.TAG_FLASH
+                };
+                for (String tag : tags) {
+                    String value = src.getAttribute(tag);
+                    if (value != null && !value.isEmpty()) {
+                        outExif.setAttribute(tag, value);
+                    }
+                }
+            }
+            outExif.setAttribute(android.media.ExifInterface.TAG_ORIENTATION,
+                    String.valueOf(android.media.ExifInterface.ORIENTATION_NORMAL));
+            outExif.setAttribute(android.media.ExifInterface.TAG_SOFTWARE, "OldTimeCamera");
+            outExif.saveAttributes();
+        } catch (Exception ignored) {
+            // Do not fail print saving if a vendor HAL produced unparseable EXIF bytes.
+        }
     }
 
     public static List<PhotoItem> loadAlbumPhotos(Context context) {
@@ -417,10 +610,11 @@ public final class PhotoSaver {
                 decoded = capEdge(decoded, maxEdge);
             }
 
-            int exifDeg = readExifRotation(resolver, uri);
-            if (exifDeg != 0) {
+            int[] exifTx = readExifTransform(resolver, uri);
+            if (exifTx[0] != 0 || exifTx[1] != 0) {
                 Matrix m = new Matrix();
-                m.postRotate(exifDeg);
+                if (exifTx[1] != 0) m.postScale(-1f, 1f);
+                if (exifTx[0] != 0) m.postRotate(exifTx[0]);
                 Bitmap rotated = Bitmap.createBitmap(
                         decoded, 0, 0, decoded.getWidth(), decoded.getHeight(), m, true);
                 if (rotated != decoded) decoded.recycle();
@@ -432,17 +626,15 @@ public final class PhotoSaver {
         }
     }
 
-    private static int readExifRotation(ContentResolver resolver, Uri uri) {
+    private static int[] readExifTransform(ContentResolver resolver, Uri uri) {
         try (InputStream is = resolver.openInputStream(uri)) {
-            if (is == null) return 0;
+            if (is == null) return new int[]{0, 0};
             android.media.ExifInterface exif = new android.media.ExifInterface(is);
             int o = exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,
                     android.media.ExifInterface.ORIENTATION_NORMAL);
-            if (o == android.media.ExifInterface.ORIENTATION_ROTATE_90) return 90;
-            if (o == android.media.ExifInterface.ORIENTATION_ROTATE_180) return 180;
-            if (o == android.media.ExifInterface.ORIENTATION_ROTATE_270) return 270;
+            return CameraTransformMath.exifOrientationToTransform(o);
         } catch (Exception ignored) {
         }
-        return 0;
+        return new int[]{0, 0};
     }
 }

@@ -67,10 +67,10 @@ public final class FilmUiHelper {
                                       OnChipSelectedListener listener) {
         outChips.clear();
         container.removeAllViews();
-        int padH = dp(context, 12);
-        int dotSize = dp(context, 8);
-        int chipH = dp(context, 34);
-        int marginH = dp(context, 4);
+        int padH = dp(context, 10);
+        int dotSize = dp(context, 6);
+        int chipH = dp(context, 30);
+        int marginH = dp(context, 3);
 
         for (int i = 0; i < presets.length; i++) {
             FilmPreset preset = presets[i];
@@ -87,14 +87,14 @@ public final class FilmUiHelper {
             dotBg.setStroke(dp(context, 1), 0x44000000);
             dot.setBackground(dotBg);
             LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dotSize, dotSize);
-            dotLp.setMarginEnd(dp(context, 7));
+            dotLp.setMarginEnd(dp(context, 6));
             chip.addView(dot, dotLp);
 
             TextView label = new TextView(context);
             label.setText(preset.name);
             label.setTypeface(Typeface.MONOSPACE);
-            label.setTextSize(10.5f);
-            label.setLetterSpacing(0.06f);
+            label.setTextSize(10f);
+            label.setLetterSpacing(0.05f);
             label.setSingleLine(true);
             chip.addView(label);
 
