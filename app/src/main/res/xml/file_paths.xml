@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Prints written before Android 10 live here as real files. -->
+    <external-path
+        name="oldtimecamera_pictures"
+        path="Pictures/OldTimeCamera/" />
+    <!-- Contact sheets and developed imports may briefly pass through the cache. -->
+    <cache-path
+        name="oldtimecamera_cache"
+        path="." />
+</paths>

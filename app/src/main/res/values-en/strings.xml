@@ -9,6 +9,9 @@
     <string name="darkroom_import">Develop from Gallery</string>
     <string name="camera_permission_needed">Camera permission required</string>
     <string name="grant_permission">Enable</string>
+    <string name="permission_settings_message">Camera access was denied and Android will not ask again. Enable it in system settings and come back.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="render_init_failed">Viewfinder failed to start: %1$s</string>
     <string name="saved_to_gallery">Saved</string>
     <string name="save_failed">Save failed</string>
     <string name="capture_busy">Developing…</string>
@@ -74,6 +77,24 @@
     <string name="rotation_auto">Auto</string>
     <string name="load_new_roll">New Roll</string>
     <string name="done">Done</string>
+    <string name="licenses_entry">Licenses</string>
+    <string name="licenses_title">Third-party licenses</string>
+    <string name="licenses_missing">License text is missing</string>
+    <string name="check_update">Check update</string>
+    <string name="update_title">Check for updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_current">Installed %1$s</string>
+    <string name="update_latest">Latest %1$s</string>
+    <string name="update_available">Update available</string>
+    <string name="update_up_to_date">You are on the latest build.</string>
+    <string name="update_open">Open releases</string>
+    <string name="update_download_install">Download &amp; install</string>
+    <string name="update_open_browser">Open in browser</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_download_failed">Download failed: %1$s</string>
+    <string name="update_network_failed">Cannot reach GitHub: %1$s</string>
+    <string name="update_install_failed">Installer unavailable, download from Releases</string>
+    <string name="update_no_browser">No browser available</string>
 
     <string name="flash_auto">AUTO</string>
     <string name="flash_on">ON</string>
@@ -93,8 +114,12 @@
     <string name="gallery_make_sheet">SHEET (%1$d)</string>
     <string name="gallery_sheet_saved">Sheet saved</string>
     <string name="gallery_share">Share</string>
+    <string name="gallery_share_failed">No app can share this</string>
+    <string name="gallery_query_failed">Cannot read archive: %1$s</string>
     <string name="gallery_delete">Delete</string>
     <string name="gallery_delete_confirm">Delete this frame?</string>
+    <string name="gallery_delete_failed">Delete failed</string>
+    <string name="gallery_frame_desc">Frame %1$d</string>
     <string name="gallery_deleted">Deleted</string>
     <string name="cancel">Cancel</string>
 </resources>

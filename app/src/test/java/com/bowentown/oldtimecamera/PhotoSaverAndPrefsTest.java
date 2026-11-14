@@ -111,17 +111,19 @@ public class PhotoSaverAndPrefsTest {
                 PhotoSaver.computePaperGeometry(1200, 1600,
                         CameraPrefs.PaperStyle.NONE, CameraPrefs.AspectRatio.RATIO_3_4));
 
-        // 1:1 preserves classic Polaroid footer proportion (0.055 pad, 0.185 footer)
+        // 1:1 preserves the classic instant-print footer proportion. Values are pinned
+        // numbers on purpose: recomputing them from the implementation would let a broken
+        // formula keep the test green.
         int[] polaroid = PhotoSaver.computePaperGeometry(1200, 1200,
                 CameraPrefs.PaperStyle.IVORY, CameraPrefs.AspectRatio.RATIO_1_1);
-        assertEquals(Math.round(1200 * 0.055f), polaroid[0]);
-        assertEquals(Math.round(1200 * 0.185f), polaroid[1]);
+        assertEquals(66, polaroid[0]);
+        assertEquals(222, polaroid[1]);
 
         // XPAN scales from short side (h=960) so footer stays sleek (< 16% of height)
         int[] xpan = PhotoSaver.computePaperGeometry(2600, 960,
                 CameraPrefs.PaperStyle.BLACK, CameraPrefs.AspectRatio.RATIO_XPAN);
-        assertEquals(Math.round(960 * 0.045f), xpan[0]);
-        assertEquals(Math.round(960 * 0.135f), xpan[1]);
+        assertEquals(43, xpan[0]);
+        assertEquals(130, xpan[1]);
         assertTrue(xpan[1] < 960 * 0.16f);
 
         assertArrayEquals(new int[]{0, 0, 0, 0},
@@ -155,6 +157,50 @@ public class PhotoSaverAndPrefsTest {
         int[] midBlend = PhotoSaver.blendScreenPixels(new int[]{mid}, new int[]{mid});
         int r = (midBlend[0] >>> 16) & 0xFF;
         assertEquals(192, r);
+    }
+
+    @Test
+    public void viewfinderMaskAndCaptureCropResolveToTheSameRatio() {
+        // 0/1/2/3 == Surface.ROTATION_0/90/180/270 (inlined constants; no framework call).
+        int[] rotations = {0, 1, 2, 3};
+        for (CameraPrefs.AspectRatio ratio : CameraPrefs.AspectRatio.values()) {
+            for (int rot : rotations) {
+                boolean landscape = (rot == 1 || rot == 3);
+                assertEquals("ratio " + ratio + " at rotation " + rot,
+                        PhotoSaver.effectiveCropRatio(ratio, landscape),
+                        PhotoSaver.previewCropRatio(ratio, rot), 1e-6f);
+            }
+        }
+        // The concrete regression: 3:4 held sideways is a 4:3 print, so the mask must be 4:3 too.
+        assertEquals(4f / 3f, PhotoSaver.previewCropRatio(CameraPrefs.AspectRatio.RATIO_3_4, 1), 1e-4f);
+        assertEquals(3f / 4f, PhotoSaver.previewCropRatio(CameraPrefs.AspectRatio.RATIO_3_4, 0), 1e-4f);
+        assertEquals(16f / 9f, PhotoSaver.previewCropRatio(CameraPrefs.AspectRatio.RATIO_16_9, 1), 1e-4f);
+    }
+
+    @Test
+    public void recipeCommentRecordsStockAndFrameWithoutPersonalData() {
+        String comment = PhotoSaver.buildRecipeComment(
+                FilmPresets.all()[1], true, false, 3, 7, 450);
+        assertTrue(comment.contains("stock=warm400"));
+        assertTrue(comment.contains("grain=boost"));
+        assertTrue(comment.contains("leak=off"));
+        assertTrue(comment.contains("roll=03"));
+        assertTrue(comment.contains("frame=07"));
+        assertTrue("rotation wraps into 0..359", comment.contains("rot=090"));
+        assertNull(PhotoSaver.buildRecipeComment(null, false, false, 1, 1, 0));
+    }
+
+    @Test
+    public void filmStockNamesAvoidThirdPartyTrademarks() {
+        String[] banned = {"PORTRA", "GOLD", "SUPERIA", "VELVIA", "TRI-X", "TRIX",
+                "KODA", "POLA", "HP5", "800T", "CINESTILL"};
+        for (FilmPreset p : FilmPresets.all()) {
+            String haystack = (p.name + " " + p.id + " " + p.isoTag).toUpperCase();
+            for (String mark : banned) {
+                assertTrue(p.name + " must not use the trademark " + mark,
+                        !haystack.contains(mark));
+            }
+        }
     }
 
     @Test

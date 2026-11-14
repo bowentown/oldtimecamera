@@ -11,3 +11,8 @@ captures/
 *.apk
 *.aab
 .workbuddy/
+
+# Never commit signing material for this project.
+*.jks
+*.keystore
+keystore.properties

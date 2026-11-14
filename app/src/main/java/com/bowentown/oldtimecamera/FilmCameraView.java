@@ -31,12 +31,17 @@ public final class FilmCameraView extends GLSurfaceView {
         default void onSwipeFilm(int direction) {}
     }
 
+    public interface OnRendererErrorListener {
+        void onRendererError(String message);
+    }
+
     private final GLFilmRenderer renderer;
     private final GestureDetector tapDetector;
     private final ScaleGestureDetector scaleDetector;
 
     private OnSurfaceReadyListener surfaceListener;
     private OnGestureListener gestureListener;
+    private OnRendererErrorListener rendererErrorListener;
     private volatile SurfaceTexture readyTexture;
     private int ratioW = 3, ratioH = 4;
     private boolean pinching = false;
@@ -132,7 +137,42 @@ public final class FilmCameraView extends GLSurfaceView {
         gestureListener = l;
     }
 
-    void notifySurfaceReady(SurfaceTexture st) {
+    public void setOnRendererErrorListener(OnRendererErrorListener l) {
+        rendererErrorListener = l;
+    }
+
+    void notifyRendererError(String message) {
+        OnRendererErrorListener l = rendererErrorListener;
+        if (l != null) l.onRendererError(message);
+    }
+
+    /**
+     * Releases the camera SurfaceTexture and every GL object owned by the renderer.
+     * Called when the hosting activity is destroyed so repeated sessions do not leak
+     * a BufferQueue plus three shader programs each time.
+     */
+    public void releaseResources() {
+        renderer.setHostResumed(false);
+        try {
+            queueEvent(renderer::releaseGlObjects);
+        } catch (RuntimeException ignored) {
+            // GL thread already gone; nothing to release.
+        }
+    }
+
+    @Override
+    public void onPause() {
+        renderer.setHostResumed(false);
+        super.onPause();
+    }
+
+    @Override
+    public void onResume() {
+        renderer.setHostResumed(true);
+        super.onResume();
+    }
+
+    public void notifySurfaceReady(SurfaceTexture st) {
         readyTexture = st;
         OnSurfaceReadyListener l = surfaceListener;
         if (l != null) l.onReady(st);
@@ -225,6 +265,12 @@ public final class FilmCameraView extends GLSurfaceView {
      */
     public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
                               boolean leakEnabled, float leakSeed) throws Exception {
+        if (!isAttachedToWindow()) {
+            throw new IllegalStateException("Viewfinder is not attached");
+        }
+        if (renderer.initError() != null) {
+            throw new IllegalStateException("GL init failed: " + renderer.initError());
+        }
         final Bitmap[] result = new Bitmap[1];
         final Throwable[] failure = new Throwable[1];
         final CountDownLatch latch = new CountDownLatch(1);
@@ -237,7 +283,7 @@ public final class FilmCameraView extends GLSurfaceView {
                 latch.countDown();
             }
         });
-        if (!latch.await(15, TimeUnit.SECONDS)) {
+        if (!latch.await(12, TimeUnit.SECONDS)) {
             throw new TimeoutException("GL render thread did not respond");
         }
         if (failure[0] != null) {
@@ -247,6 +293,11 @@ public final class FilmCameraView extends GLSurfaceView {
             throw new IllegalStateException("Renderer produced no bitmap");
         }
         return result[0];
+    }
+
+    /** Driver-safe maximum edge for a developed print, queried once the GL context exists. */
+    public int getMaxRenderEdge() {
+        return renderer.maxRenderEdge();
     }
 
     @Override

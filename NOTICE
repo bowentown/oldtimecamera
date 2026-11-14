@@ -1,0 +1,34 @@
+Old Time Camera — third-party notices
+=====================================
+
+Copyright (c) 2026 bowentown. All rights reserved.
+
+This repository and the application built from it are proprietary: no license
+is granted to copy, modify, redistribute or sell the application source code,
+art direction, GLSL film recipes or bundled paper textures.
+
+The following third-party assets are NOT covered by the above statement. They
+remain under their own licenses, and those licenses are reproduced in full in
+this directory and inside the shipped APK (assets/licenses/).
+
+1. Phosphor Icons (Regular outline set)
+   Files: app/src/main/res/drawable/ic_*.xml (excluding ic_launcher*.xml)
+   License: MIT — see LICENSES/MIT-Phosphor-Icons.txt
+   Copyright (c) 2020-2023 Phosphor Icons.
+
+2. JetBrains Mono (Regular)
+   Files: app/src/main/res/font/jetbrains_mono_regular.ttf
+   License: SIL Open Font License 1.1 — see LICENSES/OFL-1.1-JetBrains-Mono.txt
+   Copyright 2020 The JetBrains Mono Project Authors.
+   The font is redistributed unmodified and is not sold on its own.
+
+3. AndroidX / CameraX
+   Consumed as Maven artifacts under the Apache License 2.0. No source is
+   vendored into this repository.
+
+Trademarks
+----------
+Film stock names shown inside the app are original descriptive names created
+for this project ("暖肤 400", "日光 200", "冷调 400", "浓郁 50", "钨丝 800",
+"旧日 64", "硬调黑白", "柔调黑白", "一次成像", "原色"). They describe a look
+and do not claim any affiliation with, or endorsement by, any film manufacturer.

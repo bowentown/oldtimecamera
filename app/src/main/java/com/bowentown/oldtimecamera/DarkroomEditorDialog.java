@@ -74,6 +74,9 @@ public final class DarkroomEditorDialog {
         Bitmap[] previewSource = {null};
         Bitmap[] currentPreview = {null};
         boolean[] saving = {false};
+        // Each editing session gets its own organic leak seed; a hard-coded 0.28f put the
+        // leak in exactly the same corner on every imported photo.
+        final float sessionSeed = (System.currentTimeMillis() % 997L) / 997f;
 
         Runnable renderPreview = () -> {
             Bitmap src = previewSource[0];
@@ -87,27 +90,31 @@ public final class DarkroomEditorDialog {
             CameraPrefs.AspectRatio aspect = prefs.getAspectRatio();
             String note = noteInput.getText().toString();
 
-            worker.execute(() -> {
-                try {
-                    Bitmap filtered = glEngine.renderPhoto(src, preset, boostGrain, leakEnabled, 0.28f);
-                    Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
-                            prefs.getExposures() + 1, note);
-                    if (print != filtered) filtered.recycle();
-                    main.post(() -> {
-                        if (seq != renderSeq.get() || !dialog.isShowing()) {
-                            print.recycle();
-                            return;
-                        }
-                        Bitmap prev = currentPreview[0];
-                        currentPreview[0] = print;
-                        previewImage.setImageBitmap(print);
-                        if (prev != null && !prev.isRecycled()) prev.recycle();
-                        busyLabel.setVisibility(View.GONE);
-                    });
-                } catch (Exception e) {
-                    main.post(() -> busyLabel.setVisibility(View.GONE));
-                }
-            });
+            try {
+                worker.execute(() -> {
+                    try {
+                        Bitmap filtered = glEngine.renderPhoto(src, preset, boostGrain, leakEnabled, sessionSeed);
+                        Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
+                                prefs.getExposures() + 1, note);
+                        if (print != filtered) filtered.recycle();
+                        main.post(() -> {
+                            if (seq != renderSeq.get() || !dialog.isShowing()) {
+                                print.recycle();
+                                return;
+                            }
+                            Bitmap prev = currentPreview[0];
+                            currentPreview[0] = print;
+                            previewImage.setImageBitmap(print);
+                            if (prev != null && !prev.isRecycled()) prev.recycle();
+                            busyLabel.setVisibility(View.GONE);
+                        });
+                    } catch (Exception e) {
+                        main.post(() -> busyLabel.setVisibility(View.GONE));
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // Dialog already dismissed while a debounced refresh was in flight.
+            }
         };
 
         FilmUiHelper.buildFilmStrip(activity, scroll, chipContainer, presets, chips, idx -> {
@@ -152,18 +159,21 @@ public final class DarkroomEditorDialog {
 
             worker.execute(() -> {
                 try {
-                    Bitmap fullSrc = PhotoSaver.decodeScaledUri(activity, sourceUri, EXPORT_EDGE);
+                    int exportEdge = Math.min(EXPORT_EDGE, glEngine.getMaxRenderEdge());
+                    Bitmap fullSrc = PhotoSaver.decodeScaledUri(activity, sourceUri, exportEdge);
                     if (fullSrc == null) {
                         throw new IllegalStateException(activity.getString(R.string.editor_load_failed));
                     }
                     Bitmap cropped = PhotoSaver.cropToAspect(fullSrc, aspect);
-                    Bitmap filtered = glEngine.renderPhoto(cropped, preset, boostGrain, leakEnabled, 0.28f);
+                    Bitmap filtered = glEngine.renderPhoto(cropped, preset, boostGrain, leakEnabled, sessionSeed);
                     if (filtered != cropped) cropped.recycle();
                     Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
                             nextFrame, note);
                     if (print != filtered) filtered.recycle();
 
-                    Uri savedUri = PhotoSaver.save(activity, print);
+                    Uri savedUri = PhotoSaver.save(activity, print, null,
+                            PhotoSaver.buildRecipeComment(preset, boostGrain, leakEnabled,
+                                    prefs.getRollNumber(), nextFrame, 0));
                     int thumbSize = FilmUiHelper.dp(activity, 96);
                     Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
                     print.recycle();
@@ -185,14 +195,21 @@ public final class DarkroomEditorDialog {
         });
 
         dialog.setOnDismissListener(d -> {
-            worker.shutdown();
+            // Drop the 350ms debounced note refresh before the executor dies, otherwise a
+            // still-queued runnable throws RejectedExecutionException on the main thread.
+            main.removeCallbacks(debouncedNoteRefresh);
+            main.removeCallbacksAndMessages(null);
+            renderSeq.incrementAndGet();
+            worker.shutdownNow();
             if (currentPreview[0] != null && !currentPreview[0].isRecycled()) {
                 previewImage.setImageDrawable(null);
                 currentPreview[0].recycle();
                 currentPreview[0] = null;
             }
-            if (previewSource[0] != null && !previewSource[0].isRecycled()) {
-                previewSource[0].recycle();
+            if (previewSource[0] != null) {
+                // Do not recycle: a worker may still be uploading this bitmap to a GL
+                // texture, and recycling it mid-upload can crash the driver. Dropping the
+                // reference is enough; the GC frees the native pixel buffer.
                 previewSource[0] = null;
             }
         });

@@ -81,6 +81,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -155,6 +156,10 @@ public class MainActivity extends ComponentActivity {
     private float leakSeed = 0.28f;
 
     private volatile boolean capturing = false;
+    /** Whether a runtime permission dialog has already been shown once this session. */
+    private boolean permissionAsked = false;
+    /** Pending front-camera screen-flash capture; removable so a backgrounded app cannot lock the shutter. */
+    private Runnable pendingScreenFlashCapture = null;
     @SuppressWarnings("unused")
     private boolean latestAxisSwapped = true;
     private CountDownTimer activeTimer;
@@ -313,7 +318,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void loadPrefs() {
-        currentPreset = FilmPresets.indexOfId(prefs.getPresetId("portra400"));
+        currentPreset = FilmPresets.indexOfId(prefs.getPresetId("warm400"));
         aspectRatio = prefs.getAspectRatio();
         paperStyle = prefs.getPaperStyle();
         dateMode = prefs.getDateMode();
@@ -508,6 +513,10 @@ public class MainActivity extends ComponentActivity {
 
         previewView.setOnAxisSwapListener(swapped -> updateViewfinderAspectRatio(swapped, false));
         previewView.setOnPreviewStatsListener(this::handlePreviewStats);
+        previewView.setOnRendererErrorListener(message ->
+                Toast.makeText(this,
+                        getString(R.string.render_init_failed, String.valueOf(message)),
+                        Toast.LENGTH_LONG).show());
 
         previewView.setOnGestureListener(new FilmCameraView.OnGestureListener() {
             @Override
@@ -542,9 +551,17 @@ public class MainActivity extends ComponentActivity {
                 int next = CameraTransformMath.quantizeDeviceOrientation(
                         orientation, deviceSurfaceRotation);
                 if (next != deviceSurfaceRotation) {
+                    boolean wasLandscape = PhotoSaver.isLandscapeRotation(deviceSurfaceRotation);
                     deviceSurfaceRotation = next;
                     if (imageCapture != null) {
                         imageCapture.setTargetRotation(next);
+                    }
+                    // Rotating the phone flips the effective print ratio (3:4 <-> 4:3),
+                    // so the viewfinder mask has to follow immediately.
+                    if (wasLandscape != PhotoSaver.isLandscapeRotation(next)) {
+                        runOnUiThread(() -> {
+                            if (!capturing) applyAspectRatio(false);
+                        });
                     }
                 }
             }
@@ -604,8 +621,11 @@ public class MainActivity extends ComponentActivity {
 
     private void applyAspectRatio(boolean animate) {
         aspectPill.setText(aspectRatio.label);
+        // The print pipeline flips portrait ratios when the phone is held sideways, so the
+        // viewfinder mask must use the exact same effective ratio or the frame lies.
+        float targetRatio = PhotoSaver.previewCropRatio(aspectRatio, deviceSurfaceRotation);
         float[] scales = CameraTransformMath.computeFrameScale(
-                previewView.getSensorAspectRatio(), aspectRatio.widthOverHeight);
+                previewView.getSensorAspectRatio(), targetRatio);
         latestFrameScaleX = scales[0];
         latestFrameScaleY = scales[1];
         lastTapSubjectMs = 0L;
@@ -721,7 +741,10 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void handlePreviewStats(PreviewStats stats) {
-        if (stats == null || isDestroyed() || isFinishing()) return;
+        if (stats == null || stats.width <= 0 || stats.height <= 0
+                || isDestroyed() || isFinishing()) {
+            return;
+        }
         long now = SystemClock.uptimeMillis();
         lastStatsSubjectX = stats.saliencyConfidence >= 0.22f ? stats.saliencyX : Float.NaN;
         lastStatsSubjectY = stats.saliencyConfidence >= 0.22f ? stats.saliencyY : Float.NaN;
@@ -806,7 +829,8 @@ public class MainActivity extends ComponentActivity {
             nextText = getString(transientHintRes);
         } else if (activeTimer == null && !capturing
                 && permissionGate.getVisibility() != View.VISIBLE) {
-            if (assistEnabled && assistStability && stabilitySensorRegistered && !stabilityMeter.isStable()) {
+            if (assistEnabled && assistStability && stabilitySensorRegistered
+                    && stabilityMeter.isReady() && !stabilityMeter.isStable()) {
                 nextText = getString(R.string.hint_shake);
             } else if (assistEnabled && assistExposure && !exposureHintAutoFaded) {
                 ExposureAdvisor.Advice advice = effectiveExposureAdvice();
@@ -1138,7 +1162,7 @@ public class MainActivity extends ComponentActivity {
 
     private void pushPreviewTransform() {
         int displayDeg = CameraTransformMath.surfaceRotationToDegrees(getDisplaySurfaceRotation());
-        int manualOffset = manualRotation > 0 ? manualRotation : 0;
+        int manualOffset = manualRotation >= 0 ? manualRotation : 0;
         boolean extraMirror = facingFront && !frontMirrorEnabled;
         previewView.setCameraTransform(
                 latestHasCameraTransform,
@@ -1261,6 +1285,13 @@ public class MainActivity extends ComponentActivity {
             previewView.setOnSurfaceReadyListener(this::onSurfaceReady);
         } else {
             permissionGate.setVisibility(View.VISIBLE);
+            if (permissionAsked
+                    && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
+                // Already denied for good: asking again is a no-op, send the user to Settings.
+                showPermissionSettingsDialog();
+                return;
+            }
+            permissionAsked = true;
             requestPermissions(missing.toArray(new String[0]), REQUEST_PERMISSIONS);
         }
     }
@@ -1276,8 +1307,35 @@ public class MainActivity extends ComponentActivity {
         }
         if (granted) {
             ensurePermissions();
+            return;
+        }
+        permissionGate.setVisibility(View.VISIBLE);
+        // "Don't ask again" leaves the gate permanently stuck: offer a route to App info.
+        boolean permanent = permissionAsked
+                && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA);
+        if (permanent) {
+            showPermissionSettingsDialog();
         } else {
-            permissionGate.setVisibility(View.VISIBLE);
+            Toast.makeText(this, R.string.camera_permission_needed, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showPermissionSettingsDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        new android.app.AlertDialog.Builder(this)
+                .setMessage(R.string.permission_settings_message)
+                .setPositiveButton(R.string.open_settings, (d, w) -> openAppSettings())
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void openAppSettings() {
+        Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", getPackageName(), null));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (Exception ignored) {
             Toast.makeText(this, R.string.camera_permission_needed, Toast.LENGTH_LONG).show();
         }
     }
@@ -1422,7 +1480,7 @@ public class MainActivity extends ComponentActivity {
             lastFaceActiveMs = 0L;
             return;
         }
-        int manualOff = manualRotation > 0 ? manualRotation : 0;
+        int manualOff = manualRotation >= 0 ? manualRotation : 0;
         boolean baseMirrored = latestInfoMirroring;
         boolean extraMirror = lensFront && !frontMirrorEnabled;
         float[] activePt = CompositionMath.mapSensorPointToActiveFrame(
@@ -1467,7 +1525,7 @@ public class MainActivity extends ComponentActivity {
         pushPreviewTransform();
         runOnUiThread(() -> {
             if (gen != bindGeneration.get()) return;
-            int manualOff = manualRotation > 0 ? manualRotation : 0;
+            int manualOff = manualRotation >= 0 ? manualRotation : 0;
             boolean quarter = ((fallbackRot + manualOff) % 180 != 0);
             updateViewfinderAspectRatio(quarter, false);
         });
@@ -1491,7 +1549,7 @@ public class MainActivity extends ComponentActivity {
             }
             autoDegrees = info.getRotationDegrees();
             pushPreviewTransform();
-            int manualOff = manualRotation > 0 ? manualRotation : 0;
+            int manualOff = manualRotation >= 0 ? manualRotation : 0;
             boolean quarter = ((latestInfoRotation + manualOff) % 180 != 0);
             runOnUiThread(() -> {
                 if (gen != bindGeneration.get()) return;
@@ -1567,7 +1625,8 @@ public class MainActivity extends ComponentActivity {
 
     private void requestCaptureWithSteadyCheck() {
         if (capturing || imageCapture == null) return;
-        if (assistEnabled && assistSteadyShutter && stabilitySensorRegistered && !stabilityMeter.isStable()) {
+        if (assistEnabled && assistSteadyShutter && stabilitySensorRegistered
+                && stabilityMeter.isReady() && !stabilityMeter.isStable()) {
             steadyWaiting = true;
             steadyWaitStartMs = SystemClock.uptimeMillis();
             shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
@@ -1641,9 +1700,20 @@ public class MainActivity extends ComponentActivity {
 
         if (useScreenFlash) {
             beginScreenFlash();
-            previewView.postDelayed(
-                    () -> executeImageCapture(shotDoubleExposure, firstFrameSnapshot, true),
-                    120L);
+            // Keep the pending shutter on mainHandler so onPause/onDestroy can cancel it;
+            // otherwise a backgrounded app loses the Runnable while capturing stays true.
+            pendingScreenFlashCapture = () -> {
+                pendingScreenFlashCapture = null;
+                if (isDestroyed() || isFinishing() || !isActivityResumed) {
+                    endScreenFlash();
+                    capturing = false;
+                    refreshAssistHint();
+                    updateSceneChipUi();
+                    return;
+                }
+                executeImageCapture(shotDoubleExposure, firstFrameSnapshot, true);
+            };
+            mainHandler.postDelayed(pendingScreenFlashCapture, 120L);
         } else {
             viewfinderOverlay.triggerShutterEffect();
             executeImageCapture(shotDoubleExposure, firstFrameSnapshot, false);
@@ -1674,6 +1744,7 @@ public class MainActivity extends ComponentActivity {
         final boolean shotLandscape = (shotTargetRotation == Surface.ROTATION_90
                 || shotTargetRotation == Surface.ROTATION_270);
         final int nextFrame = (exposures % CameraPrefs.FRAMES_PER_ROLL) + 1;
+        final int shotRoll = rollNumber;
 
         imageCapture.setTargetRotation(shotTargetRotation);
         imageCapture.takePicture(cameraExecutor, new ImageCapture.OnImageCapturedCallback() {
@@ -1743,7 +1814,9 @@ public class MainActivity extends ComponentActivity {
                             MainActivity.this, filtered, preset, shotPaper, shotDate, shotAspect, nextFrame, null);
                     if (print != filtered) filtered.recycle();
 
-                    Uri savedUri = PhotoSaver.save(MainActivity.this, print, jpeg);
+                    Uri savedUri = PhotoSaver.save(MainActivity.this, print, jpeg,
+                            PhotoSaver.buildRecipeComment(preset, boostGrain, useLeak,
+                                    shotRoll, nextFrame, rotation));
                     int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
                     Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
                     print.recycle();
@@ -1934,6 +2007,12 @@ public class MainActivity extends ComponentActivity {
         isActivityResumed = false;
         cancelCountdown();
         cancelSteadyWait(true);
+        if (pendingScreenFlashCapture != null) {
+            // Never leave the shutter locked because a delayed capture was dropped.
+            mainHandler.removeCallbacks(pendingScreenFlashCapture);
+            pendingScreenFlashCapture = null;
+            capturing = false;
+        }
         mainHandler.removeCallbacks(clearTransientHintTask);
         mainHandler.removeCallbacks(autoFadeExposureTask);
         endScreenFlash();
@@ -1952,23 +2031,45 @@ public class MainActivity extends ComponentActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        // Unbind before touching the executor: unbindAll() still delivers final
+        // callbacks on cameraExecutor, which would throw RejectedExecutionException
+        // if the pool had already been shut down.
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+            cameraProvider = null;
+        }
         cancelCountdown();
         cancelSteadyWait(false);
         mainHandler.removeCallbacksAndMessages(null);
         if (sensorManager != null) {
             sensorManager.unregisterListener(levelSensorListener);
             sensorManager.unregisterListener(stabilitySensorListener);
+            sensorManager = null;
         }
         if (!capturing) {
             clearDoubleExposureFrame();
         }
+        // Drop the surface callback so a late GL surface cannot rebind a dead camera.
+        previewView.setOnSurfaceReadyListener(null);
         MediaActionSound sound = shutterSound;
         shutterSound = null;
         if (sound != null) {
-            cameraExecutor.execute(sound::release);
+            try {
+                cameraExecutor.execute(sound::release);
+            } catch (RejectedExecutionException alreadyStopped) {
+                sound.release();
+            }
         }
         cameraExecutor.shutdown();
-        if (cameraProvider != null) cameraProvider.unbindAll();
+        try {
+            if (!cameraExecutor.awaitTermination(600, TimeUnit.MILLISECONDS)) {
+                cameraExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            cameraExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        // Last: the framework tears down the window and the GL surface after this.
+        super.onDestroy();
     }
 }

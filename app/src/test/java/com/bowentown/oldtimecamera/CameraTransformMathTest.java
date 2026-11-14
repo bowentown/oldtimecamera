@@ -175,6 +175,10 @@ public class CameraTransformMathTest {
         // Manual override adds cleanly mod 360
         assertEquals(180, CameraTransformMath.resolveCaptureRotation(90, 90, 4000, 3000, 0, 90, 90));
         assertEquals(90, CameraTransformMath.resolveCaptureRotation(180, 180, 4000, 3000, 0, 90, 270));
+        // An explicit manual 0 is a real instruction: it suppresses the stripped-EXIF
+        // fallback instead of silently becoming "auto".
+        assertEquals(0, CameraTransformMath.resolveCaptureRotation(0, 0, 4000, 3000, 0, 90, 0));
+        assertEquals(90, CameraTransformMath.resolveCaptureRotation(90, 90, 4000, 3000, 0, 90, 0));
     }
 
     @Test

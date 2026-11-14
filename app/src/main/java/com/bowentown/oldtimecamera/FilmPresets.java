@@ -1,12 +1,18 @@
 package com.bowentown.oldtimecamera;
 
-/** The built-in classic film stock library. */
+/**
+ * The built-in film stock library.
+ *
+ * <p>Stock names are deliberately original, descriptive works of this project:
+ * they describe a look ("warm skin tone", "tungsten night") instead of borrowing
+ * another manufacturer's trademark. IDs are stable and used for persistence.
+ */
 public final class FilmPresets {
 
     private static final FilmPreset[] STOCKS = {
             FilmPreset.builder()
                     .id("raw")
-                    .name("RAW")
+                    .name("原色")
                     .isoTag("RAW")
                     .note("原片直出 · 仅保留相纸与日期")
                     .shortNote("原片直出")
@@ -18,8 +24,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("portra400")
-                    .name("PORTRA 400")
+                    .id("warm400")
+                    .name("暖肤 400")
                     .isoTag("400")
                     .note("暖肤色 / 低反差 / 细颗粒 / 象牙相纸")
                     .shortNote("暖肤色 · 低反差")
@@ -36,8 +42,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("gold200")
-                    .name("GOLD 200")
+                    .id("daylight200")
+                    .name("日光 200")
                     .isoTag("200")
                     .note("金黄日光 / 暖高光 / 暖黄漏光 / 米黄相纸")
                     .shortNote("金黄日光 · 暖调")
@@ -54,8 +60,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("superia400")
-                    .name("SUPERIA")
+                    .id("coolcast400")
+                    .name("冷调 400")
                     .isoTag("400")
                     .note("青绿阴影 / 冷调街拍 / 冷白相纸")
                     .shortNote("青绿暗部 · 清透")
@@ -72,8 +78,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("velvia50")
-                    .name("VELVIA 50")
+                    .id("vivid50")
+                    .name("浓郁 50")
                     .isoTag("50")
                     .note("反转正片 / 高饱和 / 深蓝绿 / 强反差")
                     .shortNote("高饱和反转")
@@ -89,9 +95,9 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("cinestill800t")
-                    .name("800T")
-                    .isoTag("800T")
+                    .id("tungsten800")
+                    .name("钨丝 800")
+                    .isoTag("800")
                     .note("钨丝电影卷 / 冷青夜色 / 霓虹红晕")
                     .shortNote("夜景电影 · 红晕")
                     .swatch(0xFF4F7C94)
@@ -107,8 +113,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("kodachrome64")
-                    .name("KODA 64")
+                    .id("archive64")
+                    .name("旧日 64")
                     .isoTag("64")
                     .note("纪实暖褐 / 浓郁红黄 / 岁月质感")
                     .shortNote("复古纪实 · 暖红")
@@ -125,8 +131,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("trix400")
-                    .name("TRI-X 400")
+                    .id("hardbw400")
+                    .name("硬调黑白")
                     .isoTag("B&W")
                     .note("黑白硬调 / 粗银盐颗粒 / 重暗角")
                     .shortNote("经典黑白 · 硬调")
@@ -141,8 +147,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("hp5")
-                    .name("HP5")
+                    .id("softbw400")
+                    .name("柔调黑白")
                     .isoTag("B&W")
                     .note("人文黑白 / 柔和灰阶 / 宽容影调")
                     .shortNote("人文黑白 · 柔调")
@@ -157,8 +163,8 @@ public final class FilmPresets {
                     .build(),
 
             FilmPreset.builder()
-                    .id("polaroid600")
-                    .name("POLA 600")
+                    .id("instant600")
+                    .name("一次成像")
                     .isoTag("600")
                     .note("一次成像 / 褪色偏黄 / 奶油漏光")
                     .shortNote("一次成像 · 褪色")
@@ -175,6 +181,9 @@ public final class FilmPresets {
                     .build()
     };
 
+    /** Default stock for first launch and for unknown persisted ids. */
+    public static final int DEFAULT_INDEX = 1;
+
     private FilmPresets() {}
 
     public static FilmPreset[] all() {
@@ -182,10 +191,10 @@ public final class FilmPresets {
     }
 
     public static int indexOfId(String id) {
-        if (id == null) return 1;
+        if (id == null) return DEFAULT_INDEX;
         for (int i = 0; i < STOCKS.length; i++) {
             if (STOCKS[i].id.equals(id)) return i;
         }
-        return 1;
+        return DEFAULT_INDEX;
     }
 }

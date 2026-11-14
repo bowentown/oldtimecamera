@@ -16,6 +16,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.view.Surface;
+
+import androidx.core.content.FileProvider;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -93,6 +96,9 @@ public final class PhotoSaver {
      * ({@code landscapeCapture == true}), portrait ratios like {@code 3:4} and {@code 2:3}
      * flip to {@code 4:3} and {@code 3:2}, whereas wide cinema ratios ({@code 16:9},
      * {@code XPAN}) remain landscape.
+     *
+     * <p>The live viewfinder frame must use this same value, otherwise the mask shows a
+     * portrait rectangle while the saved print is a landscape crop.
      */
     public static float effectiveCropRatio(CameraPrefs.AspectRatio ratio, boolean landscapeCapture) {
         if (ratio == null) return 3f / 4f;
@@ -100,6 +106,17 @@ public final class PhotoSaver {
             return 1f / ratio.widthOverHeight;
         }
         return ratio.widthOverHeight;
+    }
+
+    /** True when the device is physically held sideways for the given display rotation. */
+    public static boolean isLandscapeRotation(int surfaceRotation) {
+        return surfaceRotation == Surface.ROTATION_90
+                || surfaceRotation == Surface.ROTATION_270;
+    }
+
+    /** Maps a display rotation to the effective print ratio the capture pipeline will use. */
+    public static float previewCropRatio(CameraPrefs.AspectRatio ratio, int surfaceRotation) {
+        return effectiveCropRatio(ratio, isLandscapeRotation(surfaceRotation));
     }
 
     public static Bitmap cropToAspect(Bitmap src, CameraPrefs.AspectRatio ratio) {
@@ -257,6 +274,9 @@ public final class PhotoSaver {
 
         int w = photo.getWidth();
         int h = photo.getHeight();
+        // Typography is scaled off the short edge, matching the border geometry above.
+        // Scaling off the long edge made the date stamp and footer explode on XPAN.
+        int shortSide = Math.min(w, h);
         int[] geo = computePaperGeometry(w, h, paperStyle, aspect);
         int pad = geo[0];
         int footer = geo[1];
@@ -275,7 +295,7 @@ public final class PhotoSaver {
         if (hasFrame) {
             // Crisp hairline around the photograph so light skies separate cleanly from paper.
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Math.max(1f, w * 0.0014f));
+            paint.setStrokeWidth(Math.max(1f, shortSide * 0.0014f));
             paint.setColor(darkPaper ? 0x33EFE7D6 : 0x1A1A1714);
             canvas.drawRect(pad, pad, pad + w, pad + h, paint);
             paint.setStyle(Paint.Style.FILL);
@@ -286,8 +306,8 @@ public final class PhotoSaver {
         if (hasStamp) {
             paint.setTextAlign(Paint.Align.RIGHT);
             paint.setColor(0xFFF2A65A);
-            paint.setTextSize(w * 0.040f);
-            paint.setShadowLayer(w * 0.006f, 0f, 0f, 0x80000000);
+            paint.setTextSize(shortSide * 0.040f);
+            paint.setShadowLayer(shortSide * 0.006f, 0f, 0f, 0x80000000);
             canvas.drawText(stampText, pad + w * 0.952f, pad + h - h * 0.038f, paint);
             paint.clearShadowLayer();
         }
@@ -298,7 +318,7 @@ public final class PhotoSaver {
 
             paint.setTextAlign(Paint.Align.LEFT);
             paint.setColor(inkColor);
-            paint.setTextSize(w * 0.024f);
+            paint.setTextSize(shortSide * 0.024f);
             String leftLabel = frameNumber > 0
                     ? String.format(Locale.US, "%s  ·  NO.%02d", preset.name, frameNumber)
                     : preset.name;
@@ -308,7 +328,7 @@ public final class PhotoSaver {
             if (!note.isEmpty()) {
                 paint.setTextAlign(Paint.Align.RIGHT);
                 paint.setColor(darkPaper ? 0xFFEFE7D6 : 0xFF473F35);
-                paint.setTextSize(w * 0.025f);
+                paint.setTextSize(shortSide * 0.025f);
                 if (note.length() > 36) note = note.substring(0, 35) + "…";
                 canvas.drawText(note, pad + w * 0.99f, baseY, paint);
             }
@@ -417,10 +437,20 @@ public final class PhotoSaver {
     }
 
     public static Uri save(Context context, Bitmap bitmap) throws IOException {
-        return save(context, bitmap, null);
+        return save(context, bitmap, null, null);
     }
 
     public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg) throws IOException {
+        return save(context, bitmap, sourceExifJpeg, null);
+    }
+
+    /**
+     * Writes the print into the system gallery.
+     *
+     * @param recipeComment optional analog recipe string recorded in EXIF UserComment
+     */
+    public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg,
+                           String recipeComment) throws IOException {
         String name = "OTC_"
                 + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date())
                 + ".jpg";
@@ -439,7 +469,7 @@ public final class PhotoSaver {
                         throw new IOException("JPEG compression failed");
                     }
                 }
-                applyAnalogExif(tempFile, sourceExifJpeg);
+                applyAnalogExif(tempFile, sourceExifJpeg, recipeComment);
             }
 
             if (Build.VERSION.SDK_INT >= 29) {
@@ -451,18 +481,28 @@ public final class PhotoSaver {
                 values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
                 if (uri == null) throw new IOException("MediaStore insert failed");
-                try (OutputStream os = resolver.openOutputStream(uri)) {
-                    if (os == null) throw new IOException("Cannot open output stream");
-                    if (tempFile != null) {
-                        copyFileToStream(tempFile, os);
-                    } else if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
-                        throw new IOException("JPEG compression failed");
+                try {
+                    try (OutputStream os = resolver.openOutputStream(uri)) {
+                        if (os == null) throw new IOException("Cannot open output stream");
+                        if (tempFile != null) {
+                            copyFileToStream(tempFile, os);
+                        } else if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)) {
+                            throw new IOException("JPEG compression failed");
+                        }
                     }
+                    ContentValues done = new ContentValues();
+                    done.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    resolver.update(uri, done, null, null);
+                    return uri;
+                } catch (IOException | RuntimeException e) {
+                    // A half-written pending row would linger in the gallery forever
+                    // (and would be invisible to our own album query).
+                    try {
+                        resolver.delete(uri, null, null);
+                    } catch (RuntimeException ignored) {
+                    }
+                    throw e;
                 }
-                values.clear();
-                values.put(MediaStore.Images.Media.IS_PENDING, 0);
-                resolver.update(uri, values, null, null);
-                return uri;
             }
 
             File dir = new File(
@@ -480,17 +520,23 @@ public final class PhotoSaver {
                 }
             }
             if (tempFile == null) {
-                applyAnalogExif(file, sourceExifJpeg);
+                applyAnalogExif(file, sourceExifJpeg, recipeComment);
             }
             MediaScannerConnection.scanFile(context,
                     new String[]{file.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
-            return Uri.fromFile(file);
+            // API 26-28: a file:// URI would throw FileUriExposedException the moment it is
+            // shared, so hand out a content:// URI through our FileProvider instead.
+            return FileProvider.getUriForFile(context, fileProviderAuthority(context), file);
         } finally {
             if (tempFile != null && tempFile.exists()) {
                 //noinspection ResultOfMethodCallIgnored
                 tempFile.delete();
             }
         }
+    }
+
+    public static String fileProviderAuthority(Context context) {
+        return context.getPackageName() + ".fileprovider";
     }
 
     private static void copyFileToStream(File src, OutputStream os) throws IOException {
@@ -503,7 +549,25 @@ public final class PhotoSaver {
         }
     }
 
-    private static void applyAnalogExif(File outFile, byte[] sourceExifJpeg) {
+    /**
+     * Builds the analog recipe written into EXIF {@code UserComment}, so a print can be
+     * traced back to the stock and texture settings that produced it.
+     */
+    public static String buildRecipeComment(FilmPreset preset, boolean grainBoost,
+                                            boolean leakEnabled, int rollNumber,
+                                            int frameNumber, int rotationDegrees) {
+        if (preset == null) return null;
+        return String.format(Locale.US,
+                "OTC|stock=%s|grain=%s|leak=%s|roll=%02d|frame=%02d|rot=%03d",
+                preset.id,
+                grainBoost ? "boost" : "normal",
+                leakEnabled ? "on" : "off",
+                Math.max(1, rollNumber),
+                Math.max(1, frameNumber),
+                ((rotationDegrees % 360) + 360) % 360);
+    }
+
+    private static void applyAnalogExif(File outFile, byte[] sourceExifJpeg, String recipeComment) {
         try {
             android.media.ExifInterface outExif =
                     new android.media.ExifInterface(outFile.getAbsolutePath());
@@ -534,14 +598,21 @@ public final class PhotoSaver {
             outExif.setAttribute(android.media.ExifInterface.TAG_ORIENTATION,
                     String.valueOf(android.media.ExifInterface.ORIENTATION_NORMAL));
             outExif.setAttribute(android.media.ExifInterface.TAG_SOFTWARE, "OldTimeCamera");
+            if (recipeComment != null && !recipeComment.isEmpty()) {
+                outExif.setAttribute(android.media.ExifInterface.TAG_USER_COMMENT, recipeComment);
+            }
             outExif.saveAttributes();
         } catch (Exception ignored) {
             // Do not fail print saving if a vendor HAL produced unparseable EXIF bytes.
         }
     }
 
+    /** Non-null when the last album query failed for a reason other than an empty album. */
+    public static volatile String lastQueryError = null;
+
     public static List<PhotoItem> loadAlbumPhotos(Context context) {
         List<PhotoItem> items = new ArrayList<>();
+        lastQueryError = null;
         if (Build.VERSION.SDK_INT >= 29) {
             ContentResolver resolver = context.getContentResolver();
             String[] projection = {
@@ -549,7 +620,8 @@ public final class PhotoSaver {
                     MediaStore.Images.Media.DISPLAY_NAME,
                     MediaStore.Images.Media.DATE_ADDED
             };
-            String selection = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
+            String selection = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ? AND "
+                    + MediaStore.Images.Media.IS_PENDING + "=0";
             String[] args = {"%OldTimeCamera%"};
             String sort = MediaStore.Images.Media.DATE_ADDED + " DESC";
             try (Cursor cursor = resolver.query(
@@ -568,7 +640,11 @@ public final class PhotoSaver {
                         items.add(new PhotoItem(uri, name, dateSec * 1000L));
                     }
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // Do not disguise a permission/OEM failure as "no photos": the UI needs
+                // to tell the difference between an empty album and a broken query.
+                lastQueryError = e.getClass().getSimpleName()
+                        + (e.getMessage() != null ? ": " + e.getMessage() : "");
             }
             return items;
         }
@@ -601,9 +677,10 @@ public final class PhotoSaver {
             }
             int longest = Math.max(bounds.outWidth, bounds.outHeight);
             if (longest <= 0) return null;
+            // Pick the smallest power-of-two sample that still covers maxEdge. The previous
+            // 2x tolerance decoded a full 4000px lightbox image into ~48MB before scaling.
             int sample = 1;
-            int sampleLimit = maxEdge >= 1024 ? maxEdge * 2 : maxEdge;
-            while (longest / sample > sampleLimit) sample *= 2;
+            while (longest / sample > maxEdge) sample *= 2;
 
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = sample;
@@ -615,7 +692,7 @@ public final class PhotoSaver {
             }
             if (decoded == null) return null;
 
-            if (maxEdge >= 1024) {
+            if (Math.max(decoded.getWidth(), decoded.getHeight()) > maxEdge) {
                 decoded = capEdge(decoded, maxEdge);
             }
 
@@ -630,6 +707,9 @@ public final class PhotoSaver {
                 decoded = rotated;
             }
             return decoded;
+        } catch (OutOfMemoryError oom) {
+            // A single oversized frame must degrade to "no preview", never kill the process.
+            return null;
         } catch (Exception e) {
             return null;
         }

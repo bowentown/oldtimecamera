@@ -9,6 +9,9 @@
     <string name="darkroom_import">导入照片冲洗</string>
     <string name="camera_permission_needed">请开启相机权限</string>
     <string name="grant_permission">授权</string>
+    <string name="permission_settings_message">相机权限已被拒绝，且不再弹出询问。请到系统设置里手动开启后返回。</string>
+    <string name="open_settings">去设置</string>
+    <string name="render_init_failed">取景器初始化失败：%1$s</string>
     <string name="saved_to_gallery">已存</string>
     <string name="save_failed">保存失败</string>
     <string name="capture_busy">显影中…</string>
@@ -74,6 +77,24 @@
     <string name="rotation_auto">自动</string>
     <string name="load_new_roll">换新卷</string>
     <string name="done">完成</string>
+    <string name="licenses_entry">开源许可</string>
+    <string name="licenses_title">第三方开源许可</string>
+    <string name="licenses_missing">许可文本缺失</string>
+    <string name="check_update">检查更新</string>
+    <string name="update_title">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_current">当前版本 %1$s</string>
+    <string name="update_latest">最新版本 %1$s</string>
+    <string name="update_available">发现新版本</string>
+    <string name="update_up_to_date">已是最新版本。</string>
+    <string name="update_open">打开下载页</string>
+    <string name="update_download_install">下载并安装</string>
+    <string name="update_open_browser">浏览器打开</string>
+    <string name="update_downloading">正在下载安装包…</string>
+    <string name="update_download_failed">下载失败：%1$s</string>
+    <string name="update_network_failed">无法连接 GitHub：%1$s</string>
+    <string name="update_install_failed">无法启动安装器，请到 Releases 手动下载</string>
+    <string name="update_no_browser">没有可用的浏览器</string>
 
     <string name="flash_auto">AUTO</string>
     <string name="flash_on">ON</string>
@@ -93,8 +114,12 @@
     <string name="gallery_make_sheet">联系表 (%1$d)</string>
     <string name="gallery_sheet_saved">已存联系表</string>
     <string name="gallery_share">分享</string>
+    <string name="gallery_share_failed">没有可用的分享应用</string>
+    <string name="gallery_query_failed">读取底片失败：%1$s</string>
     <string name="gallery_delete">删除</string>
     <string name="gallery_delete_confirm">删除这张底片？</string>
+    <string name="gallery_delete_failed">删除失败</string>
+    <string name="gallery_frame_desc">第 %1$d 格</string>
     <string name="gallery_deleted">已删</string>
     <string name="cancel">取消</string>
 </resources>

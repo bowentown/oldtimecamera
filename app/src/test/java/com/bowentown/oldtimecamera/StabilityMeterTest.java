@@ -8,6 +8,25 @@ import static org.junit.Assert.assertTrue;
 public class StabilityMeterTest {
 
     @Test
+    public void readinessGateRequiresEnoughSamples() {
+        StabilityMeter meter = new StabilityMeter();
+        // No samples yet: callers must not treat this as "steady".
+        assertFalse(meter.isReady());
+
+        long ts = 1_000_000_000L;
+        meter.pushGyro(0.01f, 0f, 0f, ts);
+        meter.pushGyro(0.01f, 0f, 0f, ts + 30_000_000L);
+        assertFalse(meter.isReady());
+
+        meter.pushGyro(0.01f, 0f, 0f, ts + 60_000_000L);
+        assertTrue(meter.isReady());
+        assertTrue(meter.isStable());
+
+        meter.reset();
+        assertFalse(meter.isReady());
+    }
+
+    @Test
     public void gyroRms_detectsShakeAndRecoveriesWithHysteresis() {
         StabilityMeter meter = new StabilityMeter();
         assertTrue(meter.isStable());

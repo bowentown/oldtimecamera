@@ -2,6 +2,7 @@ package com.bowentown.oldtimecamera;
 
 import android.app.AlertDialog;
 import android.app.RecoverableSecurityException;
+import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
@@ -41,7 +42,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * In-app darkroom archive: browse exposed frames, inspect in a swipeable
@@ -51,7 +54,12 @@ public final class GalleryActivity extends ComponentActivity {
 
     private final List<PhotoSaver.PhotoItem> items = new ArrayList<>();
     private final Set<Uri> selectedUris = new LinkedHashSet<>();
-    private final ExecutorService worker = Executors.newFixedThreadPool(2);
+    /**
+     * Two decode threads with a bounded queue: an unbounded pool accumulated hundreds of
+     * stale thumbnail jobs when the grid was flung quickly.
+     */
+    private final ExecutorService worker = new ThreadPoolExecutor(0, 2, 30L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(48), new ThreadPoolExecutor.DiscardOldestPolicy());
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private LruCache<String, Bitmap> thumbCache;
@@ -73,6 +81,8 @@ public final class GalleryActivity extends ComponentActivity {
             registerForActivityResult(new ActivityResultContracts.StartIntentSenderForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK) {
                     onPhotoRemoved(pendingDeleteUri);
+                } else if (pendingDeleteUri != null) {
+                    Toast.makeText(this, R.string.gallery_delete_failed, Toast.LENGTH_SHORT).show();
                 }
                 pendingDeleteUri = null;
             });
@@ -89,6 +99,10 @@ public final class GalleryActivity extends ComponentActivity {
             protected int sizeOf(String key, Bitmap value) {
                 return value.getByteCount() / 1024;
             }
+            // Deliberately no entryRemoved() recycling here: an evicted bitmap may still be
+            // bound to a visible ImageView, and drawing a recycled bitmap throws. The cache
+            // is capped at 1/8 of the heap and thumbnails are sampled on decode, which is
+            // what actually bounds memory.
         };
 
         View root = findViewById(R.id.galleryRoot);
@@ -146,22 +160,33 @@ public final class GalleryActivity extends ComponentActivity {
     }
 
     private void loadPhotos() {
-        worker.execute(() -> {
-            List<PhotoSaver.PhotoItem> loaded = PhotoSaver.loadAlbumPhotos(this);
-            main.post(() -> {
-                items.clear();
-                items.addAll(loaded);
-                adapter.notifyDataSetChanged();
-                subtitleView.setText(getString(R.string.gallery_frames, items.size()));
-                emptyView.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
-                sheetToggleBtn.setVisibility(items.size() >= 2 ? View.VISIBLE : View.GONE);
-                if (!items.isEmpty()) {
-                    prefs.setLastPhotoUri(items.get(0).uri);
-                } else {
-                    prefs.setLastPhotoUri(null);
-                }
+        try {
+            worker.execute(() -> {
+                List<PhotoSaver.PhotoItem> loaded = PhotoSaver.loadAlbumPhotos(this);
+                String queryError = PhotoSaver.lastQueryError;
+                main.post(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    items.clear();
+                    items.addAll(loaded);
+                    adapter.notifyDataSetChanged();
+                    subtitleView.setText(getString(R.string.gallery_frames, items.size()));
+                    emptyView.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+                    sheetToggleBtn.setVisibility(items.size() >= 2 ? View.VISIBLE : View.GONE);
+                    if (queryError != null && items.isEmpty()) {
+                        // An empty album and a failed query used to look identical.
+                        Toast.makeText(this, getString(R.string.gallery_query_failed, queryError),
+                                Toast.LENGTH_LONG).show();
+                    }
+                    if (!items.isEmpty()) {
+                        prefs.setLastPhotoUri(items.get(0).uri);
+                    } else {
+                        prefs.setLastPhotoUri(null);
+                    }
+                });
             });
-        });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // Activity is going away.
+        }
     }
 
     private void toggleSelectMode() {
@@ -242,11 +267,19 @@ public final class GalleryActivity extends ComponentActivity {
     private void shareCurrent() {
         if (lightboxIndex < 0 || lightboxIndex >= items.size()) return;
         Uri uri = items.get(lightboxIndex).uri;
+        String mime = getContentResolver().getType(uri);
         Intent share = new Intent(Intent.ACTION_SEND);
-        share.setType("image/jpeg");
+        share.setType(mime != null ? mime : "image/jpeg");
         share.putExtra(Intent.EXTRA_STREAM, uri);
+        // ClipData is what actually carries the read grant to the chosen target on
+        // strict receiving apps; the flag alone is not always enough.
+        share.setClipData(ClipData.newUri(getContentResolver(), "OldTimeCamera print", uri));
         share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivity(Intent.createChooser(share, getString(R.string.gallery_share)));
+        try {
+            startActivity(Intent.createChooser(share, getString(R.string.gallery_share)));
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, R.string.gallery_share_failed, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void confirmDeleteCurrent() {
@@ -265,6 +298,8 @@ public final class GalleryActivity extends ComponentActivity {
                 File f = new File(uri.getPath());
                 if (f.delete()) {
                     onPhotoRemoved(uri);
+                } else {
+                    Toast.makeText(this, R.string.gallery_delete_failed, Toast.LENGTH_SHORT).show();
                 }
                 return;
             }
@@ -278,13 +313,18 @@ public final class GalleryActivity extends ComponentActivity {
                 launchDeleteRequestApi30(uri);
                 return;
             } else if (Build.VERSION.SDK_INT == 29) {
-                handleRecoverableApi29(uri, se);
-                return;
+                if (handleRecoverableApi29(uri, se)) return;
             }
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.gallery_delete_failed, Toast.LENGTH_SHORT).show();
+            return;
         }
         if (Build.VERSION.SDK_INT >= 30) {
             launchDeleteRequestApi30(uri);
+            return;
         }
+        // API 26-29 without a recoverable intent: tell the user instead of doing nothing.
+        Toast.makeText(this, R.string.gallery_delete_failed, Toast.LENGTH_SHORT).show();
     }
 
     @RequiresApi(30)
@@ -297,14 +337,16 @@ public final class GalleryActivity extends ComponentActivity {
     }
 
     @RequiresApi(29)
-    private void handleRecoverableApi29(Uri uri, SecurityException se) {
+    private boolean handleRecoverableApi29(Uri uri, SecurityException se) {
         if (se instanceof RecoverableSecurityException) {
             pendingDeleteUri = uri;
             RecoverableSecurityException rse = (RecoverableSecurityException) se;
             IntentSenderRequest req = new IntentSenderRequest.Builder(
                     rse.getUserAction().getActionIntent().getIntentSender()).build();
             deleteSenderLauncher.launch(req);
+            return true;
         }
+        return false;
     }
 
     private void onPhotoRemoved(Uri uri) {
@@ -331,10 +373,11 @@ public final class GalleryActivity extends ComponentActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         worker.shutdownNow();
         closeLightbox();
+        main.removeCallbacksAndMessages(null);
         thumbCache.evictAll();
+        super.onDestroy();
     }
 
     private final class FrameAdapter extends BaseAdapter {
@@ -402,6 +445,9 @@ public final class GalleryActivity extends ComponentActivity {
             PhotoSaver.PhotoItem item = items.get(position);
             String key = item.uri.toString();
             img.setTag(key);
+            img.setContentDescription(getString(R.string.gallery_frame_desc, position + 1));
+            cell.setContentDescription(getString(R.string.gallery_frame_desc, position + 1)
+                    + (selectMode ? " · " + getString(R.string.gallery_select_hint) : ""));
 
             boolean isSelected = selectMode && selectedUris.contains(item.uri);
             check.setVisibility(isSelected ? View.VISIBLE : View.GONE);

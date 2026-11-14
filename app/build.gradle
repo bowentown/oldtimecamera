@@ -2,6 +2,25 @@ plugins {
     id 'com.android.application'
 }
 
+// Release signing is supplied out-of-band: either keystore.properties (git-ignored)
+// or OTC_* environment variables injected from CI secrets. A public repository must
+// never contain a private keystore, and a public debug key must never sign a release.
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def releaseStoreFile = System.getenv('OTC_STORE_FILE') ?: keystoreProps.getProperty('storeFile')
+def releaseStorePassword = System.getenv('OTC_STORE_PASSWORD') ?: keystoreProps.getProperty('storePassword')
+def releaseKeyAlias = System.getenv('OTC_KEY_ALIAS') ?: keystoreProps.getProperty('keyAlias')
+def releaseKeyPassword = System.getenv('OTC_KEY_PASSWORD') ?: keystoreProps.getProperty('keyPassword')
+def hasReleaseSigning = releaseStoreFile != null
+        && new File(releaseStoreFile).exists()
+        && releaseStorePassword != null
+        && releaseKeyAlias != null
+        && releaseKeyPassword != null
+
 android {
     namespace 'com.bowentown.oldtimecamera'
     compileSdk 36
@@ -10,9 +29,20 @@ android {
         applicationId 'com.bowentown.oldtimecamera'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '1.3.0'
+        versionCode 6
+        versionName '1.4.0'
         resConfigs 'zh', 'en'
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -20,10 +50,14 @@ android {
             // Keep the debug APK small enough to share, no extra flavour needed.
         }
         release {
-            minifyEnabled false
-            // Sign release builds with the debug key so the APK is installable
-            // without shipping a private keystore in a public repository.
-            signingConfig signingConfigs.debug
+            // The shipped artifact is minified: the film recipes and GLSL are the product.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -32,6 +66,9 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        buildConfig false
+    }
 }
 
 // CameraX 1.3.x resolves kotlin-stdlib 1.8.x, while some transitive
@@ -50,6 +87,8 @@ dependencies {
     // ComponentActivity supplies the LifecycleOwner that bindToLifecycle needs,
     // without pulling in AppCompat or forcing an AppCompat theme.
     implementation 'androidx.activity:activity:1.9.3'
+    // FileProvider is needed to share prints written as files on API 26-28.
+    implementation 'androidx.core:core:1.13.1'
 
     testImplementation 'junit:junit:4.13.2'
 }

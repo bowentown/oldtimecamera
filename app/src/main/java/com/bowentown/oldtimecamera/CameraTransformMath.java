@@ -291,12 +291,15 @@ public final class CameraTransformMath {
 
         int base = exifDegrees != 0 ? exifDegrees : proxyRotationDegrees;
         boolean targetIsPortrait = (targetCaptureSurfaceRotation == 0 || targetCaptureSurfaceRotation == 2);
+        // Only fall back to the sensor rotation when the photographer has NOT pinned a
+        // manual angle. An explicit 0 degrees is a real instruction ("do not rotate"),
+        // so it must also suppress the fallback.
         if (base == 0 && targetIsPortrait && bitmapW > bitmapH
                 && manualRotationDegrees < 0 && (normalizeDegrees(autoSensorRotationDegrees) % 180 != 0)) {
             // Defensive fallback if HAL stripped EXIF and ImageInfo rotation on a portrait capture.
             base = autoSensorRotationDegrees;
         }
-        int manual = manualRotationDegrees > 0 ? manualRotationDegrees : 0;
+        int manual = manualRotationDegrees >= 0 ? manualRotationDegrees : 0;
         return normalizeDegrees(base + manual);
     }
 

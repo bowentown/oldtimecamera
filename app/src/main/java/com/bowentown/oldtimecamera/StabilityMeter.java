@@ -8,6 +8,8 @@ public final class StabilityMeter {
 
     private static final int WINDOW_CAPACITY = 24;
     private static final long WINDOW_NS = 450_000_000L;
+    /** Below this many samples the window is too short to judge hands, so callers must not gate on it. */
+    private static final int MIN_READY_SAMPLES = 3;
 
     public static final float GYRO_UNSTABLE_RMS = 0.24f; // rad/s
     public static final float GYRO_STABLE_RMS = 0.15f;   // rad/s
@@ -40,6 +42,15 @@ public final class StabilityMeter {
 
     public boolean isStable() {
         return !unstable;
+    }
+
+    /**
+     * Whether enough samples have arrived for {@link #isStable()} to mean anything.
+     * Sensors need a few frames after registration (or after returning from the
+     * background); until then a shutter must fall through instead of being held.
+     */
+    public boolean isReady() {
+        return count >= MIN_READY_SAMPLES;
     }
 
     public float getLatestRms() {

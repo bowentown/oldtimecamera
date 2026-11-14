@@ -11,13 +11,13 @@ public final class SceneClassifier {
 
     public enum Scene {
         GENERAL(null, null),
-        NIGHT("cinestill800t", "800T"),
-        PORTRAIT("portra400", "PORTRA"),
-        BACKLIT("gold200", "GOLD 200"),
-        GOLDEN_HOUR("gold200", "GOLD 200"),
-        COOL_OVERCAST("superia400", "SUPERIA"),
-        VIVID_LANDSCAPE("velvia50", "VELVIA 50"),
-        LOW_SATURATION("trix400", "TRI-X");
+        NIGHT("tungsten800", "钨丝 800"),
+        PORTRAIT("warm400", "暖肤 400"),
+        BACKLIT("daylight200", "日光 200"),
+        GOLDEN_HOUR("daylight200", "日光 200"),
+        COOL_OVERCAST("coolcast400", "冷调 400"),
+        VIVID_LANDSCAPE("vivid50", "浓郁 50"),
+        LOW_SATURATION("hardbw400", "硬调");
 
         public final String presetId;
         public final String shortLabel;
@@ -69,7 +69,7 @@ public final class SceneClassifier {
      * if scene is general, already uses the target film stock, or was dismissed by the user.
      */
     public Recommendation evaluate(PreviewStats stats, boolean hasFace, String currentPresetId) {
-        if (stats == null) {
+        if (stats == null || stats.width <= 0 || stats.height <= 0) {
             return null;
         }
         Scene instant = classifyInstant(stats, hasFace);
@@ -91,8 +91,8 @@ public final class SceneClassifier {
         String presetId = activeScene.presetId;
         String label = activeScene.shortLabel;
         if (activeScene == Scene.BACKLIT && hasFace) {
-            presetId = "portra400";
-            label = "PORTRA";
+            presetId = "warm400";
+            label = "暖肤 400";
         }
         if (presetId == null || presetId.equals(currentPresetId)) {
             return null;
@@ -101,10 +101,16 @@ public final class SceneClassifier {
     }
 
     public static Scene classifyInstant(PreviewStats s, boolean hasFace) {
-        if (s == null) return Scene.GENERAL;
+        if (s == null || s.width <= 0 || s.height <= 0) return Scene.GENERAL;
+        // A covered lens / completely dark frame carries no scene information and must not
+        // be recommended as a night stock.
+        if (s.meanLuma < 0.02f && s.clippedHighlights < 0.01f) return Scene.GENERAL;
 
-        boolean backlit = s.borderLuma >= 0.62f && s.centerLuma <= 0.34f
-                && (s.borderLuma - s.centerLuma) >= 0.25f;
+        // Backlit: bright surround with a clearly darker centre. The gap condition is
+        // expressed as a ratio so a marginally-lit edge cannot win on the absolute delta alone.
+        boolean backlit = s.borderLuma >= 0.62f
+                && s.centerLuma <= 0.34f
+                && s.centerLuma <= s.borderLuma * 0.55f;
         if (backlit) {
             return Scene.BACKLIT;
         }

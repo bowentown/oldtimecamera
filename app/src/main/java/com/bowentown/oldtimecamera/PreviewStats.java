@@ -77,6 +77,7 @@ public final class PreviewStats {
         int borderCount = 0;
         int clipCount = 0;
         int shadowCount = 0;
+        int satCount = 0;
 
         int cLeft = width / 4;
         int cRight = (width * 3) / 4;
@@ -104,6 +105,7 @@ public final class PreviewStats {
                 float minC = Math.min(r, Math.min(g, b));
                 if (maxC > 0.04f) {
                     sumSat += (maxC - minC) / maxC;
+                    satCount++;
                 }
 
                 if (yVal >= 0.92f) clipCount++;
@@ -171,7 +173,9 @@ public final class PreviewStats {
                 (float) (sumR / n),
                 (float) (sumG / n),
                 (float) (sumB / n),
-                (float) (sumSat / n),
+                // Average only over pixels that actually carry chroma; dividing by the full
+                // pixel count biased dark/night frames towards "desaturated".
+                satCount > 0 ? (float) (sumSat / satCount) : 0f,
                 salX,
                 salY,
                 salConf

@@ -180,6 +180,9 @@ public final class DarkroomSheet {
             dialog.dismiss();
         });
 
+        dialog.findViewById(R.id.sheetLicensesButton).setOnClickListener(v -> LicenseDialog.show(context));
+        dialog.findViewById(R.id.sheetUpdateButton).setOnClickListener(v -> UpdateChecker.show(context));
+
         dialog.show();
     }
 
@@ -206,6 +209,7 @@ public final class DarkroomSheet {
             tv.setText(labels[i]);
             tv.setGravity(Gravity.CENTER);
             tv.setSingleLine(true);
+            tv.setContentDescription(labels[i]);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
             int idx = i;

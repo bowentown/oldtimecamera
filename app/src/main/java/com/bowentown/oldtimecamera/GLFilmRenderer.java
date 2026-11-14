@@ -295,6 +295,14 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private volatile float leakSeed = 0.28f;
     private volatile float frameScaleX = 1f;
     private volatile float frameScaleY = 1f;
+    /** Last timestamp used for the live preview, so the print can freeze the same grain pattern. */
+    private volatile float previewTimeSec = 0f;
+    /** False while the host is paused: renderPhoto must fail fast instead of waiting for a stopped GL loop. */
+    private volatile boolean hostResumed = true;
+    /** Driver texture limit; prints are capped to it because applyPaper makes them larger still. */
+    private int glMaxTexture = 2048;
+    /** Non-null when the GL context could not be initialised (shader/driver failure). */
+    private volatile String initError = null;
 
     GLFilmRenderer(FilmCameraView view, FilmPreset initialPreset) {
         this.view = view;
@@ -311,25 +319,94 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glDisable(GLES20.GL_BLEND);
         GLES20.glClearColor(0.067f, 0.063f, 0.055f, 1f);
 
-        oesTextureId = createOesTexture();
-        surfaceTexture = new SurfaceTexture(oesTextureId);
-        surfaceTexture.setOnFrameAvailableListener(this);
+        // An EGL context loss re-enters this method; drop the previous generation first
+        // so textures/programs/FBOs and the old SurfaceTexture are not leaked.
+        releaseGlObjects();
 
-        previewProgram = createProgram(VERTEX_SHADER, PREVIEW_FRAGMENT);
-        photoProgram = createProgram(VERTEX_SHADER, PHOTO_FRAGMENT);
-        meterProgram = createProgram(METER_VERTEX_SHADER, METER_FRAGMENT_SHADER);
-        previewLocs = Locs.of(previewProgram);
-        photoLocs = Locs.of(photoProgram);
-        meterLocs = Locs.of(meterProgram);
+        try {
+            int[] maxTex = new int[1];
+            GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTex, 0);
+            if (maxTex[0] >= 1024) {
+                glMaxTexture = maxTex[0];
+            }
 
-        quadBuffer = floatBuffer(QUAD);
-        cameraTexBuffer = floatBuffer(TEX_CAMERA);
-        photoTexBuffer = floatBuffer(TEX_PHOTO);
+            oesTextureId = createOesTexture();
+            surfaceTexture = new SurfaceTexture(oesTextureId);
+            surfaceTexture.setOnFrameAvailableListener(this);
 
-        initMeterFbo();
+            previewProgram = createProgram(VERTEX_SHADER, PREVIEW_FRAGMENT);
+            photoProgram = createProgram(VERTEX_SHADER, PHOTO_FRAGMENT);
+            meterProgram = createProgram(METER_VERTEX_SHADER, METER_FRAGMENT_SHADER);
+            previewLocs = Locs.of(previewProgram);
+            photoLocs = Locs.of(photoProgram);
+            meterLocs = Locs.of(meterProgram);
+
+            quadBuffer = floatBuffer(QUAD);
+            cameraTexBuffer = floatBuffer(TEX_CAMERA);
+            photoTexBuffer = floatBuffer(TEX_PHOTO);
+
+            initMeterFbo();
+            initError = null;
+        } catch (Throwable t) {
+            // A shader compile/link failure used to surface as a silent black viewfinder.
+            initError = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+            releaseGlObjects();
+            view.post(() -> view.notifyRendererError(initError));
+            return;
+        }
 
         SurfaceTexture ready = surfaceTexture;
         view.post(() -> view.notifySurfaceReady(ready));
+    }
+
+    /**
+     * Deletes every GL object owned by the renderer and releases the SurfaceTexture.
+     * Must run on the GL thread. Safe to call repeatedly.
+     */
+    void releaseGlObjects() {
+        if (surfaceTexture != null) {
+            surfaceTexture.setOnFrameAvailableListener(null);
+            surfaceTexture.release();
+            surfaceTexture = null;
+        }
+        if (oesTextureId != 0) {
+            int[] tex = {oesTextureId};
+            GLES20.glDeleteTextures(1, tex, 0);
+            oesTextureId = 0;
+        }
+        if (meterFboId != 0) {
+            int[] fbo = {meterFboId};
+            GLES20.glDeleteFramebuffers(1, fbo, 0);
+            meterFboId = 0;
+        }
+        if (meterTexId != 0) {
+            int[] tex = {meterTexId};
+            GLES20.glDeleteTextures(1, tex, 0);
+            meterTexId = 0;
+        }
+        int[] programs = {previewProgram, photoProgram, meterProgram};
+        for (int p : programs) {
+            if (p != 0) GLES20.glDeleteProgram(p);
+        }
+        previewProgram = 0;
+        photoProgram = 0;
+        meterProgram = 0;
+        previewLocs = null;
+        photoLocs = null;
+        meterLocs = null;
+        lastReportedAxisSwap = null;
+    }
+
+    int maxRenderEdge() {
+        return Math.min(glMaxTexture, 4096);
+    }
+
+    String initError() {
+        return initError;
+    }
+
+    void setHostResumed(boolean resumed) {
+        hostResumed = resumed;
     }
 
     private void initMeterFbo() {
@@ -397,8 +474,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
         GLES20.glUseProgram(previewProgram);
         FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
+        previewTimeSec = (System.nanoTime() % 1_000_000_000L) / 1_000_000_000f;
         applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, leakSeed,
-                frameScaleX, frameScaleY, viewportW, viewportH);
+                frameScaleX, frameScaleY, viewportW, viewportH, previewTimeSec);
         GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
         drawQuad(previewLocs, cameraTexBuffer);
 
@@ -529,8 +607,25 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
      */
     Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
                        boolean leakEnabled, float seed) {
-        int w = source.getWidth();
-        int h = source.getHeight();
+        if (!hostResumed) {
+            throw new IllegalStateException("GL preview paused");
+        }
+        if (photoProgram == 0) {
+            throw new IllegalStateException("GL renderer not ready");
+        }
+        // applyPaper later adds a border on top, so keep the development target inside
+        // the driver's texture limit instead of producing an incomplete FBO.
+        int maxEdge = maxRenderEdge();
+        Bitmap renderSrc = source;
+        int longest = Math.max(source.getWidth(), source.getHeight());
+        if (longest > maxEdge) {
+            float scale = (float) maxEdge / longest;
+            renderSrc = Bitmap.createScaledBitmap(source,
+                    Math.max(1, Math.round(source.getWidth() * scale)),
+                    Math.max(1, Math.round(source.getHeight() * scale)), true);
+        }
+        int w = renderSrc.getWidth();
+        int h = renderSrc.getHeight();
 
         int[] textures = new int[2];
         int[] fbo = new int[1];
@@ -548,7 +643,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, source, 0);
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, renderSrc, 0);
 
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, dstTex);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
@@ -570,7 +665,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             GLES20.glUseProgram(photoProgram);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
-            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h);
+            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h,
+                    previewTimeSec);
             GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
             drawQuad(photoLocs, photoTexBuffer);
             GLES20.glFinish();
@@ -602,6 +698,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             GLES20.glDeleteFramebuffers(1, fbo, 0);
             GLES20.glDeleteTextures(2, textures, 0);
             GLES20.glViewport(0, 0, viewportW, viewportH);
+            if (renderSrc != source && !renderSrc.isRecycled()) {
+                renderSrc.recycle();
+            }
         }
     }
 
@@ -610,7 +709,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private static void applyUniformsFor(Locs l, FilmPreset p, boolean boostGrain,
                                          boolean leakEnabled, float seed,
                                          float frameScaleX, float frameScaleY,
-                                         int w, int h) {
+                                         int w, int h, float timeSec) {
         GLES20.glUniform1i(l.texture, 0);
         GLES20.glUniformMatrix3fv(l.colorMatrix, 1, false, p.colorMatrix, 0);
         GLES20.glUniform3f(l.colorOffset, p.colorOffset[0], p.colorOffset[1], p.colorOffset[2]);
@@ -626,7 +725,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUniform3f(l.leakColor, p.leakColor[0], p.leakColor[1], p.leakColor[2]);
         GLES20.glUniform1f(l.leakSeed, seed);
         GLES20.glUniform2f(l.frameScale, frameScaleX, frameScaleY);
-        GLES20.glUniform1f(l.time, (System.nanoTime() % 1_000_000_000L) / 1_000_000_000f);
+        GLES20.glUniform1f(l.time, timeSec);
         GLES20.glUniform2f(l.resolution, w, h);
     }
 

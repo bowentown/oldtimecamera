@@ -17,49 +17,49 @@ public class SceneClassifierTest {
 
     @Test
     public void mapsScenesToExpectedVintageStocksAfterTemporalStability() {
-        // NIGHT -> CineStill 800T
+        // NIGHT -> tungsten night stock
         SceneClassifier clf = new SceneClassifier();
         PreviewStats night = rgbStats(0.16f, 0.14f, 0.16f, 0.20f, 0.22f, 0.16f, 0.16f);
-        assertNull(clf.evaluate(night, false, "portra400"));
-        assertNull(clf.evaluate(night, false, "portra400"));
-        SceneClassifier.Recommendation rec = clf.evaluate(night, false, "portra400");
+        assertNull(clf.evaluate(night, false, "warm400"));
+        assertNull(clf.evaluate(night, false, "warm400"));
+        SceneClassifier.Recommendation rec = clf.evaluate(night, false, "warm400");
         assertNotNull(rec);
         assertEquals(SceneClassifier.Scene.NIGHT, rec.scene);
-        assertEquals("cinestill800t", rec.presetId);
-        assertEquals("800T", rec.shortLabel);
+        assertEquals("tungsten800", rec.presetId);
+        assertEquals("钨丝 800", rec.shortLabel);
 
         // Already using suggested preset -> returns null (never redundant)
-        assertNull(clf.evaluate(night, false, "cinestill800t"));
+        assertNull(clf.evaluate(night, false, "tungsten800"));
 
         // Dismiss -> stays suppressed even on continued night frames
         clf.dismiss(SceneClassifier.Scene.NIGHT);
-        assertNull(clf.evaluate(night, false, "portra400"));
+        assertNull(clf.evaluate(night, false, "warm400"));
 
         // Null stats must not corrupt streak or active scene
-        assertNull(clf.evaluate(null, false, "portra400"));
+        assertNull(clf.evaluate(null, false, "warm400"));
         assertEquals(SceneClassifier.Scene.NIGHT, clf.getActiveScene());
 
         // Switching to another scene (GOLDEN_HOUR) and returning to NIGHT preserves NIGHT dismissal
         PreviewStats golden = rgbStats(0.52f, 0.65f, 0.50f, 0.34f, 0.42f, 0.52f, 0.52f);
-        assertNull(clf.evaluate(golden, false, "portra400"));
-        assertNull(clf.evaluate(golden, false, "portra400"));
-        SceneClassifier.Recommendation goldRec = clf.evaluate(golden, false, "portra400");
+        assertNull(clf.evaluate(golden, false, "warm400"));
+        assertNull(clf.evaluate(golden, false, "warm400"));
+        SceneClassifier.Recommendation goldRec = clf.evaluate(golden, false, "warm400");
         assertNotNull(goldRec);
         assertEquals(SceneClassifier.Scene.GOLDEN_HOUR, goldRec.scene);
         // Switching back to NIGHT holds GOLDEN_HOUR through 2 hysteresis frames, then re-activates NIGHT (still dismissed)
-        assertNotNull(clf.evaluate(night, false, "portra400"));
-        assertNotNull(clf.evaluate(night, false, "portra400"));
+        assertNotNull(clf.evaluate(night, false, "warm400"));
+        assertNotNull(clf.evaluate(night, false, "warm400"));
         for (int i = 0; i < 3; i++) {
-            assertNull(clf.evaluate(night, false, "portra400"));
+            assertNull(clf.evaluate(night, false, "warm400"));
         }
         assertEquals(SceneClassifier.Scene.NIGHT, clf.getActiveScene());
 
         // Full reset clears dismissed memory
         clf.reset();
         for (int i = 0; i < 2; i++) {
-            assertNull(clf.evaluate(night, false, "portra400"));
+            assertNull(clf.evaluate(night, false, "warm400"));
         }
-        assertNotNull(clf.evaluate(night, false, "portra400"));
+        assertNotNull(clf.evaluate(night, false, "warm400"));
     }
 
     @Test
@@ -69,30 +69,50 @@ public class SceneClassifierTest {
                 SceneClassifier.classifyInstant(
                         rgbStats(0.50f, 0.5f, 0.5f, 0.5f, 0.20f, 0.25f, 0.72f), true));
 
-        // Portrait -> PORTRA 400
+        // Portrait -> warm skin stock
         assertEquals(SceneClassifier.Scene.PORTRAIT,
                 SceneClassifier.classifyInstant(
                         rgbStats(0.52f, 0.58f, 0.50f, 0.45f, 0.25f, 0.52f, 0.52f), true));
 
-        // Low saturation monochrome scene -> TRI-X 400
+        // Low saturation monochrome scene -> hard B&W
         assertEquals(SceneClassifier.Scene.LOW_SATURATION,
                 SceneClassifier.classifyInstant(
                         rgbStats(0.45f, 0.45f, 0.45f, 0.45f, 0.05f, 0.45f, 0.45f), false));
 
-        // Golden hour -> GOLD 200
+        // Golden hour -> daylight stock
         assertEquals(SceneClassifier.Scene.GOLDEN_HOUR,
                 SceneClassifier.classifyInstant(
                         rgbStats(0.52f, 0.65f, 0.50f, 0.34f, 0.42f, 0.52f, 0.52f), false));
 
-        // Cool overcast -> SUPERIA 400
+        // Cool overcast -> cool stock
         assertEquals(SceneClassifier.Scene.COOL_OVERCAST,
                 SceneClassifier.classifyInstant(
                         rgbStats(0.50f, 0.42f, 0.50f, 0.58f, 0.25f, 0.50f, 0.50f), false));
 
-        // Vivid foliage/landscape -> VELVIA 50
+        // Vivid foliage/landscape -> vivid stock
         assertEquals(SceneClassifier.Scene.VIVID_LANDSCAPE,
                 SceneClassifier.classifyInstant(
                         rgbStats(0.52f, 0.42f, 0.62f, 0.38f, 0.46f, 0.52f, 0.52f), false));
+    }
+
+    @Test
+    public void invalidOrCoveredFrames_neverTriggerAFilmSuggestion() {
+        SceneClassifier clf = new SceneClassifier();
+        // A lens covered by a palm is dark and flat: it must not be read as "night".
+        PreviewStats covered = rgbStats(0.005f, 0.005f, 0.005f, 0.005f, 0f, 0.005f, 0.005f);
+        assertEquals(SceneClassifier.Scene.GENERAL,
+                SceneClassifier.classifyInstant(covered, false));
+        for (int i = 0; i < 5; i++) {
+            assertNull(clf.evaluate(covered, false, "warm400"));
+        }
+        assertEquals(SceneClassifier.Scene.GENERAL, clf.getActiveScene());
+
+        // Statistics from a frame that was never sampled (0x0) must be ignored entirely.
+        PreviewStats empty = new PreviewStats(0, 0, 0.5f, 0f, 0f, 0.5f, 0.5f,
+                0.5f, 0.5f, 0.5f, 0f, 0.5f, 0.5f, 0f);
+        assertNull(clf.evaluate(empty, false, "warm400"));
+        assertEquals(SceneClassifier.Scene.GENERAL,
+                SceneClassifier.classifyInstant(empty, false));
     }
 
     @Test
