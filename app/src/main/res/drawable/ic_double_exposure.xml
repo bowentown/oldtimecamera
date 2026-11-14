@@ -1,16 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Source: Phosphor Icons raw/regular/intersect.svg (MIT License) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M4.5,6.5h10v10h-10z"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.6"
+        android:pathData="M2.25,9 A6.75,6.75 0 1 0 15.75,9 A6.75,6.75 0 1 0 2.25,9 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="@color/paper"
+        android:strokeLineCap="round"
         android:strokeLineJoin="round" />
     <path
-        android:pathData="M9.5,7.5h10v10h-10z"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.6"
+        android:pathData="M8.25,15 A6.75,6.75 0 1 0 21.75,15 A6.75,6.75 0 1 0 8.25,15 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="@color/paper"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M9.236,11.486 L12.514,14.764"
+        android:strokeWidth="1.5"
+        android:strokeColor="@color/paper"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M11.486,9.236 L14.764,12.514"
+        android:strokeWidth="1.5"
+        android:strokeColor="@color/paper"
+        android:strokeLineCap="round"
         android:strokeLineJoin="round" />
 </vector>

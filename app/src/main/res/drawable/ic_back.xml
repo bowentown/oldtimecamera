@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Source: Phosphor Icons raw/regular/caret-left.svg (MIT License) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#F0E8D8"
-        android:strokeWidth="1.8"
+        android:pathData="M15,19.5 L7.5,12 L15,4.5"
+        android:strokeWidth="1.5"
+        android:strokeColor="@color/paper"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M15,5 L8,12 L15,19" />
+        android:strokeLineJoin="round" />
 </vector>

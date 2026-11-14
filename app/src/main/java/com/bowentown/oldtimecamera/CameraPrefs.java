@@ -5,8 +5,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 
 /**
- * Persists roll state and darkroom preferences across launches without
- * introducing any database or network dependency.
+ * Persists roll state, darkroom preferences, and beginner assist toggles across launches
+ * without introducing any database or network dependency.
  */
 public final class CameraPrefs {
 
@@ -76,12 +76,21 @@ public final class CameraPrefs {
     private static final String KEY_GRAIN_BOOST = "grain_boost";
     private static final String KEY_LIGHT_LEAK = "light_leak";
     private static final String KEY_GRID = "grid_enabled";
+    private static final String KEY_GRID_MODE = "grid_mode";
+    private static final String KEY_GOLDEN_ROT = "golden_rot";
     private static final String KEY_SOUND = "shutter_sound";
     private static final String KEY_FRONT_MIRROR = "front_mirror";
     private static final String KEY_TIMER_SECONDS = "timer_seconds";
     private static final String KEY_LEVEL_ENABLED = "level_enabled";
     private static final String KEY_MANUAL_ROTATION = "manual_rotation";
     private static final String KEY_LAST_PHOTO_URI = "last_photo_uri";
+
+    private static final String KEY_ASSIST_ENABLED = "assist_enabled";
+    private static final String KEY_ASSIST_COMP = "assist_comp";
+    private static final String KEY_ASSIST_EXPOSURE = "assist_exposure";
+    private static final String KEY_ASSIST_SCENE = "assist_scene";
+    private static final String KEY_ASSIST_STABILITY = "assist_stability";
+    private static final String KEY_ASSIST_STEADY_SHUTTER = "assist_steady_shutter";
 
     private final SharedPreferences sp;
 
@@ -154,12 +163,38 @@ public final class CameraPrefs {
         sp.edit().putBoolean(KEY_LIGHT_LEAK, enabled).apply();
     }
 
+    public CompositionMath.GridMode getGridMode() {
+        String raw = sp.getString(KEY_GRID_MODE, null);
+        if (raw != null) {
+            return CompositionMath.GridMode.fromName(raw);
+        }
+        return sp.getBoolean(KEY_GRID, false)
+                ? CompositionMath.GridMode.THIRDS
+                : CompositionMath.GridMode.OFF;
+    }
+
+    public void setGridMode(CompositionMath.GridMode mode) {
+        CompositionMath.GridMode m = mode != null ? mode : CompositionMath.GridMode.OFF;
+        sp.edit()
+                .putString(KEY_GRID_MODE, m.name())
+                .putBoolean(KEY_GRID, m != CompositionMath.GridMode.OFF)
+                .apply();
+    }
+
     public boolean isGridEnabled() {
-        return sp.getBoolean(KEY_GRID, false);
+        return getGridMode() != CompositionMath.GridMode.OFF;
     }
 
     public void setGridEnabled(boolean enabled) {
-        sp.edit().putBoolean(KEY_GRID, enabled).apply();
+        setGridMode(enabled ? CompositionMath.GridMode.THIRDS : CompositionMath.GridMode.OFF);
+    }
+
+    public int getGoldenRotation() {
+        return ((sp.getInt(KEY_GOLDEN_ROT, 0) % 4) + 4) % 4;
+    }
+
+    public void setGoldenRotation(int rotSteps) {
+        sp.edit().putInt(KEY_GOLDEN_ROT, ((rotSteps % 4) + 4) % 4).apply();
     }
 
     public boolean isShutterSoundEnabled() {
@@ -201,6 +236,54 @@ public final class CameraPrefs {
 
     public void setManualRotation(int degrees) {
         sp.edit().putInt(KEY_MANUAL_ROTATION, degrees).apply();
+    }
+
+    public boolean isAssistEnabled() {
+        return sp.getBoolean(KEY_ASSIST_ENABLED, true);
+    }
+
+    public void setAssistEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_ENABLED, enabled).apply();
+    }
+
+    public boolean isAssistComposition() {
+        return sp.getBoolean(KEY_ASSIST_COMP, true);
+    }
+
+    public void setAssistComposition(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_COMP, enabled).apply();
+    }
+
+    public boolean isAssistExposure() {
+        return sp.getBoolean(KEY_ASSIST_EXPOSURE, true);
+    }
+
+    public void setAssistExposure(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_EXPOSURE, enabled).apply();
+    }
+
+    public boolean isAssistScene() {
+        return sp.getBoolean(KEY_ASSIST_SCENE, true);
+    }
+
+    public void setAssistScene(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_SCENE, enabled).apply();
+    }
+
+    public boolean isAssistStability() {
+        return sp.getBoolean(KEY_ASSIST_STABILITY, true);
+    }
+
+    public void setAssistStability(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_STABILITY, enabled).apply();
+    }
+
+    public boolean isAssistSteadyShutter() {
+        return sp.getBoolean(KEY_ASSIST_STEADY_SHUTTER, true);
+    }
+
+    public void setAssistSteadyShutter(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_STEADY_SHUTTER, enabled).apply();
     }
 
     public Uri getLastPhotoUri() {

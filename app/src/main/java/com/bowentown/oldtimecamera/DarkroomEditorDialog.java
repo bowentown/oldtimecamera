@@ -90,7 +90,7 @@ public final class DarkroomEditorDialog {
             worker.execute(() -> {
                 try {
                     Bitmap filtered = glEngine.renderPhoto(src, preset, boostGrain, leakEnabled, 0.28f);
-                    Bitmap print = PhotoSaver.applyPaper(filtered, preset, paper, dateMode, aspect,
+                    Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
                             prefs.getExposures() + 1, note);
                     if (print != filtered) filtered.recycle();
                     main.post(() -> {
@@ -159,7 +159,7 @@ public final class DarkroomEditorDialog {
                     Bitmap cropped = PhotoSaver.cropToAspect(fullSrc, aspect);
                     Bitmap filtered = glEngine.renderPhoto(cropped, preset, boostGrain, leakEnabled, 0.28f);
                     if (filtered != cropped) cropped.recycle();
-                    Bitmap print = PhotoSaver.applyPaper(filtered, preset, paper, dateMode, aspect,
+                    Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
                             nextFrame, note);
                     if (print != filtered) filtered.recycle();
 

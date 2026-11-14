@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.HapticFeedbackConstants;
@@ -13,7 +14,8 @@ import android.view.animation.DecelerateInterpolator;
 
 /**
  * Draws the optical rangefinder frame curtains, subtle corner brackets,
- * optional rule-of-thirds composition grid, and animated tap-to-focus reticle.
+ * multi-mode composition guides (thirds, rotatable golden spiral, crosshair) with
+ * intersection snap highlights, and animated tap-to-focus reticle.
  */
 public final class ViewfinderOverlayView extends View {
 
@@ -25,7 +27,12 @@ public final class ViewfinderOverlayView extends View {
     private final Paint frameLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cornerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint spiralPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint snapGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint snapCorePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint focusPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path spiralPath = new Path();
+    private final RectF tmpOval = new RectF();
 
     private final RectF activeRect = new RectF();
     private float currentScaleX = 1f;
@@ -33,7 +40,12 @@ public final class ViewfinderOverlayView extends View {
     private float targetScaleX = 1f;
     private float targetScaleY = 1f;
 
-    private boolean gridEnabled = false;
+    private CompositionMath.GridMode gridMode = CompositionMath.GridMode.OFF;
+    private int goldenRotation = 0;
+    private int highlightedPowerPoint = -1;
+    private int drawingPowerPoint = -1;
+    private float snapGlowAlpha = 0f;
+
     private float focusX = -1f;
     private float focusY = -1f;
     private float focusAlpha = 0f;
@@ -41,9 +53,22 @@ public final class ViewfinderOverlayView extends View {
 
     private ValueAnimator frameAnimator;
     private ValueAnimator focusAnimator;
+    private ValueAnimator snapAnimator;
     private OnFrameBoundsListener boundsListener;
 
     private final Runnable hideFocusTask = this::fadeOutFocus;
+
+    private boolean levelEnabled = false;
+    private float tiltDegrees = 0f;
+    private boolean wasLevel = false;
+    private long lastLevelHapticMs = 0L;
+    private float shutterCurtainProgress = 0f;
+    private ValueAnimator shutterAnimator;
+    private Bitmap ghostBitmap = null;
+    private final Paint levelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint ghostPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint shutterPaint = new Paint();
+    private final Paint shutterFlashBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     public ViewfinderOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -61,14 +86,33 @@ public final class ViewfinderOverlayView extends View {
         cornerPaint.setStrokeWidth(1.4f * d);
         cornerPaint.setStrokeCap(Paint.Cap.SQUARE);
 
-        gridPaint.setColor(0x30EFE7D6);
+        gridPaint.setColor(0x32EFE7D6);
         gridPaint.setStyle(Paint.Style.STROKE);
-        gridPaint.setStrokeWidth(0.75f * d);
+        gridPaint.setStrokeWidth(0.8f * d);
+
+        spiralPaint.setColor(0x4CEFE7D6);
+        spiralPaint.setStyle(Paint.Style.STROKE);
+        spiralPaint.setStrokeWidth(1.05f * d);
+        spiralPaint.setStrokeCap(Paint.Cap.ROUND);
+        spiralPaint.setStrokeJoin(Paint.Join.ROUND);
+
+        snapGlowPaint.setColor(0xFFF2A65A);
+        snapGlowPaint.setStyle(Paint.Style.STROKE);
+        snapGlowPaint.setStrokeWidth(1.6f * d);
+
+        snapCorePaint.setColor(0xFFF2A65A);
+        snapCorePaint.setStyle(Paint.Style.FILL);
 
         focusPaint.setColor(0xFFF2A65A);
         focusPaint.setStyle(Paint.Style.STROKE);
         focusPaint.setStrokeWidth(1.5f * d);
         focusPaint.setStrokeCap(Paint.Cap.ROUND);
+
+        shutterPaint.setColor(0xF20D0C0B);
+        shutterPaint.setStyle(Paint.Style.FILL);
+        shutterFlashBorderPaint.setColor(0x99F2A65A);
+        shutterFlashBorderPaint.setStyle(Paint.Style.STROKE);
+        shutterFlashBorderPaint.setStrokeWidth(2f * d);
     }
 
     public void setOnFrameBoundsListener(OnFrameBoundsListener listener) {
@@ -77,8 +121,58 @@ public final class ViewfinderOverlayView extends View {
     }
 
     public void setGridEnabled(boolean enabled) {
-        this.gridEnabled = enabled;
-        invalidate();
+        setGridMode(enabled ? CompositionMath.GridMode.THIRDS : CompositionMath.GridMode.OFF);
+    }
+
+    public void setGridMode(CompositionMath.GridMode mode) {
+        CompositionMath.GridMode safe = mode != null ? mode : CompositionMath.GridMode.OFF;
+        if (this.gridMode != safe) {
+            this.gridMode = safe;
+            if (safe == CompositionMath.GridMode.OFF) {
+                setPowerPointHighlight(-1);
+            } else {
+                highlightedPowerPoint = -1;
+                drawingPowerPoint = -1;
+                snapGlowAlpha = 0f;
+                if (snapAnimator != null) snapAnimator.cancel();
+            }
+            invalidate();
+        }
+    }
+
+    public void setGoldenRotation(int rotSteps) {
+        int norm = ((rotSteps % 4) + 4) % 4;
+        if (this.goldenRotation != norm) {
+            this.goldenRotation = norm;
+            invalidate();
+        }
+    }
+
+    /** Highlights an aligned composition power point with a subtle warm amber fade animation. */
+    public void setPowerPointHighlight(int index) {
+        if (highlightedPowerPoint == index) return;
+        highlightedPowerPoint = index;
+        if (index >= 0) {
+            drawingPowerPoint = index;
+        }
+        if (snapAnimator != null) snapAnimator.cancel();
+        if (index < 0 && drawingPowerPoint < 0) {
+            snapGlowAlpha = 0f;
+            invalidate();
+            return;
+        }
+        float target = index >= 0 ? 1f : 0f;
+        snapAnimator = ValueAnimator.ofFloat(snapGlowAlpha, target);
+        snapAnimator.setDuration(index >= 0 ? 180 : 260);
+        snapAnimator.setInterpolator(new DecelerateInterpolator());
+        snapAnimator.addUpdateListener(anim -> {
+            snapGlowAlpha = (float) anim.getAnimatedValue();
+            if (highlightedPowerPoint < 0 && snapGlowAlpha <= 0.005f) {
+                drawingPowerPoint = -1;
+            }
+            invalidate();
+        });
+        snapAnimator.start();
     }
 
     public void setFrameScale(float scaleX, float scaleY, boolean animate) {
@@ -160,26 +254,6 @@ public final class ViewfinderOverlayView extends View {
         notifyBounds();
     }
 
-    private boolean levelEnabled = false;
-    private float tiltDegrees = 0f;
-    private boolean wasLevel = false;
-    private long lastLevelHapticMs = 0L;
-    private float shutterCurtainProgress = 0f;
-    private ValueAnimator shutterAnimator;
-    private Bitmap ghostBitmap = null;
-    private final Paint levelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint ghostPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Paint shutterPaint = new Paint();
-    private final Paint shutterFlashBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-    {
-        shutterPaint.setColor(0xF20D0C0B);
-        shutterPaint.setStyle(Paint.Style.FILL);
-        shutterFlashBorderPaint.setColor(0x99F2A65A);
-        shutterFlashBorderPaint.setStyle(Paint.Style.STROKE);
-        shutterFlashBorderPaint.setStrokeWidth(2f * getResources().getDisplayMetrics().density);
-    }
-
     public void setLevelEnabled(boolean enabled) {
         if (this.levelEnabled != enabled) {
             this.levelEnabled = enabled;
@@ -244,6 +318,7 @@ public final class ViewfinderOverlayView extends View {
         removeCallbacks(hideFocusTask);
         if (frameAnimator != null) frameAnimator.cancel();
         if (focusAnimator != null) focusAnimator.cancel();
+        if (snapAnimator != null) snapAnimator.cancel();
         if (shutterAnimator != null) shutterAnimator.cancel();
         if (ghostBitmap != null && !ghostBitmap.isRecycled()) {
             ghostBitmap.recycle();
@@ -287,23 +362,11 @@ public final class ViewfinderOverlayView extends View {
             canvas.restore();
         }
 
-        // Optional rule-of-thirds composition lines.
-        if (gridEnabled) {
-            float gw = activeRect.width() / 3f;
-            float gh = activeRect.height() / 3f;
-            canvas.drawLine(activeRect.left + gw, activeRect.top,
-                    activeRect.left + gw, activeRect.bottom, gridPaint);
-            canvas.drawLine(activeRect.left + gw * 2f, activeRect.top,
-                    activeRect.left + gw * 2f, activeRect.bottom, gridPaint);
-            canvas.drawLine(activeRect.left, activeRect.top + gh,
-                    activeRect.right, activeRect.top + gh, gridPaint);
-            canvas.drawLine(activeRect.left, activeRect.top + gh * 2f,
-                    activeRect.right, activeRect.top + gh * 2f, gridPaint);
-        }
+        float d = getResources().getDisplayMetrics().density;
+        drawCompositionOverlay(canvas, d);
 
         // Subtle optical viewfinder hairline + corner ticks.
         canvas.drawRect(activeRect, frameLinePaint);
-        float d = getResources().getDisplayMetrics().density;
         float tick = 12f * d;
         float l = activeRect.left + 1f;
         float t = activeRect.top + 1f;
@@ -331,7 +394,6 @@ public final class ViewfinderOverlayView extends View {
             levelPaint.setStrokeWidth((isLevel ? 1.7f : 1.15f) * d);
             levelPaint.setColor(isLevel ? 0xE6F2A65A : 0x80F0E8D8);
 
-            // Outer reference ticks along the nearest 90-degree cardinal axis.
             canvas.save();
             canvas.rotate(-snapAngle, cx, cy);
             float tickStart = 28f * d;
@@ -340,7 +402,6 @@ public final class ViewfinderOverlayView extends View {
             canvas.drawLine(cx + tickStart, cy, cx + tickEnd, cy, levelPaint);
             canvas.restore();
 
-            // Tilted center bar.
             canvas.save();
             canvas.rotate(-tiltDegrees, cx, cy);
             float halfBar = 20f * d;
@@ -385,5 +446,69 @@ public final class ViewfinderOverlayView extends View {
             shutterFlashBorderPaint.setAlpha(Math.round(160f * shutterCurtainProgress));
             canvas.drawRect(activeRect, shutterFlashBorderPaint);
         }
+    }
+
+    private void drawCompositionOverlay(Canvas canvas, float d) {
+        if (gridMode == CompositionMath.GridMode.OFF) return;
+
+        float aw = activeRect.width();
+        float ah = activeRect.height();
+        float al = activeRect.left;
+        float at = activeRect.top;
+
+        canvas.save();
+        canvas.clipRect(activeRect);
+
+        if (gridMode == CompositionMath.GridMode.THIRDS) {
+            float gw = aw / 3f;
+            float gh = ah / 3f;
+            canvas.drawLine(al + gw, at, al + gw, activeRect.bottom, gridPaint);
+            canvas.drawLine(al + gw * 2f, at, al + gw * 2f, activeRect.bottom, gridPaint);
+            canvas.drawLine(al, at + gh, activeRect.right, at + gh, gridPaint);
+            canvas.drawLine(al, at + gh * 2f, activeRect.right, at + gh * 2f, gridPaint);
+        } else if (gridMode == CompositionMath.GridMode.GOLDEN_SPIRAL) {
+            CompositionMath.SpiralArc[] arcs = CompositionMath.buildGoldenSpiral(goldenRotation, 7);
+            spiralPath.reset();
+            for (int i = 0; i < arcs.length; i++) {
+                CompositionMath.SpiralArc a = arcs[i];
+                canvas.drawLine(
+                        al + a.divX1 * aw, at + a.divY1 * ah,
+                        al + a.divX2 * aw, at + a.divY2 * ah,
+                        gridPaint);
+                tmpOval.set(
+                        al + a.ovalLeft * aw,
+                        at + a.ovalTop * ah,
+                        al + a.ovalRight * aw,
+                        at + a.ovalBottom * ah);
+                if (i == 0) {
+                    spiralPath.moveTo(al + a.startX * aw, at + a.startY * ah);
+                }
+                spiralPath.arcTo(tmpOval, a.startAngleDeg, a.sweepAngleDeg, false);
+            }
+            canvas.drawPath(spiralPath, spiralPaint);
+        } else if (gridMode == CompositionMath.GridMode.CROSSHAIR) {
+            float cx = activeRect.centerX();
+            float cy = activeRect.centerY();
+            float outer = 20f * d;
+            float inner = 6f * d;
+            canvas.drawLine(cx - outer, cy, cx - inner, cy, spiralPaint);
+            canvas.drawLine(cx + inner, cy, cx + outer, cy, spiralPaint);
+            canvas.drawLine(cx, cy - outer, cx, cy - inner, spiralPaint);
+            canvas.drawLine(cx, cy + inner, cx, cy + outer, spiralPaint);
+        }
+
+        if (drawingPowerPoint >= 0 && snapGlowAlpha > 0.01f) {
+            float[][] pts = CompositionMath.powerPoints(gridMode, goldenRotation);
+            if (drawingPowerPoint < pts.length) {
+                float px = al + pts[drawingPowerPoint][0] * aw;
+                float py = at + pts[drawingPowerPoint][1] * ah;
+                snapGlowPaint.setAlpha(Math.round(220f * snapGlowAlpha));
+                snapCorePaint.setAlpha(Math.round(160f * snapGlowAlpha));
+                canvas.drawCircle(px, py, 9f * d, snapGlowPaint);
+                canvas.drawCircle(px, py, 2.5f * d, snapCorePaint);
+            }
+        }
+
+        canvas.restore();
     }
 }

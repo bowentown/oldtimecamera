@@ -1,50 +1,114 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+    <style name="AppTheme.Base" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/film_black</item>
         <item name="android:statusBarColor">@color/film_black</item>
         <item name="android:navigationBarColor">@color/film_black</item>
         <item name="android:windowFullscreen">false</item>
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
     </style>
 
-    <style name="FilmLabel">
+    <style name="AppTheme" parent="AppTheme.Base" />
+
+    <!-- Typography Scale -->
+    <style name="TextTitle">
         <item name="android:textColor">@color/paper</item>
-        <item name="android:fontFamily">monospace</item>
+        <item name="android:fontFamily">serif</item>
         <item name="android:letterSpacing">0.12</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="TextMonoTitle">
+        <item name="android:textColor">@color/paper</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_regular</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:textSize">44sp</item>
+    </style>
+
+    <style name="TextLabel">
+        <item name="android:textColor">@color/paper</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="TextCaption">
+        <item name="android:textColor">@color/paper</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="TextMonoLabel">
+        <item name="android:textColor">@color/paper</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_regular</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="TextMonoCaption">
+        <item name="android:textColor">@color/paper</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_regular</item>
+        <item name="android:letterSpacing">0.08</item>
         <item name="android:textSize">11sp</item>
     </style>
 
-    <style name="TopIconButton">
-        <item name="android:layout_width">38dp</item>
-        <item name="android:layout_height">38dp</item>
-        <item name="android:background">@drawable/bg_round_button</item>
-        <item name="android:padding">9dp</item>
-        <item name="android:scaleType">fitCenter</item>
+    <style name="TextMonoStamp">
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_regular</item>
+        <item name="android:letterSpacing">0.10</item>
+        <item name="android:textSize">12sp</item>
     </style>
 
-    <style name="HudPill">
+    <style name="FilmLabel" parent="TextMonoCaption">
+        <item name="android:letterSpacing">0.10</item>
+    </style>
+
+    <style name="TopIconButton">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:background">@drawable/bg_round_button</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:tint">@color/paper</item>
+    </style>
+
+    <style name="HudPill" parent="TextMonoCaption">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">28dp</item>
-        <item name="android:fontFamily">monospace</item>
-        <item name="android:textSize">10sp</item>
-        <item name="android:letterSpacing">0.08</item>
-        <item name="android:textColor">@color/paper</item>
+        <item name="android:background">@drawable/bg_pill_ripple</item>
         <item name="android:gravity">center</item>
         <item name="android:paddingStart">10dp</item>
         <item name="android:paddingEnd">10dp</item>
     </style>
 
-    <style name="SheetSectionLabel">
+    <style name="HudDivider">
+        <item name="android:layout_width">1dp</item>
+        <item name="android:layout_height">14dp</item>
+        <item name="android:layout_marginStart">2dp</item>
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:background">@color/hairline_soft</item>
+    </style>
+
+    <style name="SheetSectionLabel" parent="TextMonoCaption">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:fontFamily">monospace</item>
         <item name="android:letterSpacing">0.14</item>
         <item name="android:textColor">@color/paper_dim</item>
-        <item name="android:textSize">10sp</item>
-        <item name="android:layout_marginTop">14dp</item>
-        <item name="android:layout_marginBottom">7dp</item>
+        <item name="android:layout_marginTop">16dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+    </style>
+
+    <style name="AssistHintPill" parent="TextCaption">
+        <item name="android:background">@drawable/bg_assist_pill</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:singleLine">true</item>
+    </style>
+
+    <style name="SceneRecommendChip">
+        <item name="android:background">@drawable/bg_assist_pill</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">6dp</item>
     </style>
 </resources>

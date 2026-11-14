@@ -11,7 +11,6 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.graphics.Typeface;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -241,6 +240,16 @@ public final class PhotoSaver {
                                     CameraPrefs.AspectRatio aspect,
                                     int frameNumber,
                                     String customNote) {
+        return applyPaper(null, photo, preset, paperStyle, dateMode, aspect, frameNumber, customNote);
+    }
+
+    /** Adds the selected print border, frame badge, optional note, and LED date stamp. */
+    public static Bitmap applyPaper(Context context, Bitmap photo, FilmPreset preset,
+                                    CameraPrefs.PaperStyle paperStyle,
+                                    CameraPrefs.DateMode dateMode,
+                                    CameraPrefs.AspectRatio aspect,
+                                    int frameNumber,
+                                    String customNote) {
         boolean hasFrame = paperStyle != CameraPrefs.PaperStyle.NONE;
         String stampText = dateString(dateMode);
         boolean hasStamp = !stampText.isEmpty();
@@ -272,7 +281,7 @@ public final class PhotoSaver {
             paint.setStyle(Paint.Style.FILL);
         }
 
-        paint.setTypeface(Typeface.MONOSPACE);
+        paint.setTypeface(FilmUiHelper.monoFont(context));
 
         if (hasStamp) {
             paint.setTextAlign(Paint.Align.RIGHT);
@@ -354,7 +363,7 @@ public final class PhotoSaver {
         }
 
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        textPaint.setTypeface(Typeface.MONOSPACE);
+        textPaint.setTypeface(FilmUiHelper.monoFont(context));
         textPaint.setColor(0xFFF0E8D8);
         textPaint.setTextSize(26f);
         canvas.drawText(String.format(Locale.US, "ROLL %02d  ·  CONTACT SHEET", rollNumber),

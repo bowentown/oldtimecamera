@@ -1,7 +1,6 @@
 package com.bowentown.oldtimecamera;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -14,17 +13,33 @@ import android.widget.TextView;
 
 import java.util.List;
 
-/** Shared UI helpers: system bar inset padding and film-stock swatch chips. */
+/** Shared UI helpers: system bar inset padding, bundled font loader, and film-stock chips. */
 public final class FilmUiHelper {
 
     public interface OnChipSelectedListener {
         void onSelected(int index);
     }
 
+    private static volatile Typeface cachedMono;
+
     private FilmUiHelper() {}
 
     public static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    public static Typeface monoFont(Context context) {
+        if (cachedMono != null) return cachedMono;
+        if (context == null) return Typeface.MONOSPACE;
+        try {
+            Typeface tf = context.getResources().getFont(R.font.jetbrains_mono_regular);
+            if (tf != null) {
+                cachedMono = tf;
+                return tf;
+            }
+        } catch (Exception ignored) {
+        }
+        return Typeface.MONOSPACE;
     }
 
     /** Applies status/navigation bar & cutout padding so edge-to-edge on API 35 never clips UI. */
@@ -67,10 +82,10 @@ public final class FilmUiHelper {
                                       OnChipSelectedListener listener) {
         outChips.clear();
         container.removeAllViews();
-        int padH = dp(context, 10);
+        int padH = dp(context, 12);
         int dotSize = dp(context, 6);
-        int chipH = dp(context, 30);
-        int marginH = dp(context, 3);
+        int chipH = dp(context, 32);
+        int marginH = dp(context, 4);
 
         for (int i = 0; i < presets.length; i++) {
             FilmPreset preset = presets[i];
@@ -91,10 +106,8 @@ public final class FilmUiHelper {
             chip.addView(dot, dotLp);
 
             TextView label = new TextView(context);
+            label.setTextAppearance(R.style.FilmLabel);
             label.setText(preset.name);
-            label.setTypeface(Typeface.MONOSPACE);
-            label.setTextSize(10f);
-            label.setLetterSpacing(0.05f);
             label.setSingleLine(true);
             chip.addView(label);
 
@@ -113,19 +126,18 @@ public final class FilmUiHelper {
     }
 
     public static void updateChipSelection(Context context, List<LinearLayout> chips, int selectedIndex) {
-        int selectedBg = context.getResources().getColor(R.color.chip_selected, context.getTheme());
-        int idleBg = context.getResources().getColor(R.color.chip_idle, context.getTheme());
         int ink = context.getResources().getColor(R.color.ink, context.getTheme());
         int paper = context.getResources().getColor(R.color.paper, context.getTheme());
+        Typeface mono = monoFont(context);
 
         for (int i = 0; i < chips.size(); i++) {
             boolean selected = (i == selectedIndex);
             LinearLayout chip = chips.get(i);
-            chip.setBackgroundTintList(ColorStateList.valueOf(selected ? selectedBg : idleBg));
+            chip.setBackgroundResource(selected ? R.drawable.bg_chip_selected : R.drawable.bg_chip);
             TextView label = (TextView) chip.getChildAt(1);
             label.setTextColor(selected ? ink : paper);
-            label.setTypeface(Typeface.MONOSPACE, selected ? Typeface.BOLD : Typeface.NORMAL);
-            chip.setAlpha(selected ? 1f : 0.86f);
+            label.setTypeface(mono, selected ? Typeface.BOLD : Typeface.NORMAL);
+            chip.setAlpha(selected ? 1f : 0.88f);
         }
     }
 

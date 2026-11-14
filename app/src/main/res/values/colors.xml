@@ -6,14 +6,21 @@
     <color name="film_surface">#2A2520</color>
     <color name="hairline">#2AEFE7D6</color>
     <color name="hairline_soft">#18EFE7D6</color>
+    <color name="hairline_strong">#3CEFE7D6</color>
 
     <color name="paper">#F0E8D8</color>
+    <color name="paper_soft">#CCEFE7D6</color>
     <color name="paper_dim">#9B9180</color>
     <color name="paper_muted">#665E52</color>
     <color name="ink">#1A1714</color>
 
     <color name="accent">#D25A34</color>
     <color name="amber_led">#F2A65A</color>
+    <color name="amber_hairline">#4DF2A65A</color>
+    <color name="pill_bg">#BA141210</color>
+    <color name="control_bg">#8C1A1714</color>
+    <color name="ripple_warm">#2EEFE7D6</color>
+    <color name="switch_track_off">#3A342C</color>
 
     <color name="chip_selected">#F0E8D8</color>
     <color name="chip_idle">#1E1B17</color>

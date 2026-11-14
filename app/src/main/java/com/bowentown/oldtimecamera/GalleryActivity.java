@@ -366,7 +366,8 @@ public final class GalleryActivity extends ComponentActivity {
                 cell = new FrameLayout(GalleryActivity.this);
                 cell.setLayoutParams(new GridView.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, cellSize));
-                cell.setBackgroundColor(0xFF1A1714);
+                cell.setBackgroundResource(R.drawable.bg_gallery_cell);
+                cell.setClipToOutline(true);
 
                 img = new ImageView(GalleryActivity.this);
                 img.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -387,6 +388,7 @@ public final class GalleryActivity extends ComponentActivity {
                 bg.setStroke(FilmUiHelper.dp(GalleryActivity.this, 1), 0x801A1714);
                 check.setBackground(bg);
                 check.setImageResource(R.drawable.ic_check);
+                check.setImageTintList(android.content.res.ColorStateList.valueOf(getColor(R.color.ink)));
                 cell.addView(check, clp);
 
                 cell.setTag(new View[]{img, check});

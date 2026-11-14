@@ -8,6 +8,7 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
+import android.os.SystemClock;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -125,6 +126,29 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "}"
     );
 
+    private static final String METER_VERTEX_SHADER = String.join("\n",
+            "attribute vec4 aPosition;",
+            "attribute vec2 aTexCoord;",
+            "uniform mat4 uTexMatrix;",
+            "uniform vec2 uFrameScale;",
+            "varying vec2 vTexCoord;",
+            "void main() {",
+            "    gl_Position = aPosition;",
+            "    vec2 activeUv = (aTexCoord - 0.5) * uFrameScale + 0.5;",
+            "    vTexCoord = (uTexMatrix * vec4(activeUv, 0.0, 1.0)).xy;",
+            "}"
+    );
+
+    private static final String METER_FRAGMENT_SHADER = String.join("\n",
+            "#extension GL_OES_EGL_image_external : require",
+            "precision mediump float;",
+            "varying vec2 vTexCoord;",
+            "uniform samplerExternalOES uTexture;",
+            "void main() {",
+            "    gl_FragColor = vec4(texture2D(uTexture, vTexCoord).rgb, 1.0);",
+            "}"
+    );
+
     private static final String PHOTO_FRAGMENT = String.join("\n",
             PRECISION_HEADER,
             "varying vec2 vTexCoord;",
@@ -196,14 +220,26 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private final FilmCameraView view;
     private final ConcurrentLinkedQueue<Runnable> glTasks = new ConcurrentLinkedQueue<>();
 
+    private static final int METER_W = 32;
+    private static final int METER_H = 24;
+    private static final long METER_INTERVAL_MS = 300L;
+
     private SurfaceTexture surfaceTexture;
     private int oesTextureId;
-    private int previewProgram, photoProgram;
-    private Locs previewLocs, photoLocs;
+    private int previewProgram, photoProgram, meterProgram;
+    private Locs previewLocs, photoLocs, meterLocs;
+    private int meterFboId = 0, meterTexId = 0;
+    private ByteBuffer meterReadBuffer;
+    private byte[] meterPixelBytes;
+    private long lastMeterMs = 0L;
     private FloatBuffer quadBuffer, cameraTexBuffer, photoTexBuffer;
 
     interface OnAxisSwapListener {
         void onAxisSwapChanged(boolean swapped);
+    }
+
+    interface OnPreviewStatsListener {
+        void onPreviewStats(PreviewStats stats);
     }
 
     private static final class TransformConfig {
@@ -250,6 +286,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private volatile TransformConfig transformConfig = new TransformConfig(
             true, 0, false, 0f, 0f, 1f, 1f, 0, 0, false);
     private volatile OnAxisSwapListener axisSwapListener;
+    private volatile OnPreviewStatsListener previewStatsListener;
+    private volatile boolean telemetryEnabled = true;
     private Boolean lastReportedAxisSwap = null;
     private volatile FilmPreset preset;
     private volatile boolean grainBoost = false;
@@ -279,15 +317,56 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
         previewProgram = createProgram(VERTEX_SHADER, PREVIEW_FRAGMENT);
         photoProgram = createProgram(VERTEX_SHADER, PHOTO_FRAGMENT);
+        meterProgram = createProgram(METER_VERTEX_SHADER, METER_FRAGMENT_SHADER);
         previewLocs = Locs.of(previewProgram);
         photoLocs = Locs.of(photoProgram);
+        meterLocs = Locs.of(meterProgram);
 
         quadBuffer = floatBuffer(QUAD);
         cameraTexBuffer = floatBuffer(TEX_CAMERA);
         photoTexBuffer = floatBuffer(TEX_PHOTO);
 
+        initMeterFbo();
+
         SurfaceTexture ready = surfaceTexture;
         view.post(() -> view.notifySurfaceReady(ready));
+    }
+
+    private void initMeterFbo() {
+        meterFboId = 0;
+        meterTexId = 0;
+        int[] tex = new int[1];
+        int[] fbo = new int[1];
+        GLES20.glGenTextures(1, tex, 0);
+        GLES20.glGenFramebuffers(1, fbo, 0);
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, METER_W, METER_H, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0]);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, tex[0], 0);
+        int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+
+        if (status == GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            meterTexId = tex[0];
+            meterFboId = fbo[0];
+            int bytes = METER_W * METER_H * 4;
+            if (meterReadBuffer == null || meterReadBuffer.capacity() < bytes) {
+                meterReadBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
+                meterPixelBytes = new byte[bytes];
+            }
+        } else {
+            GLES20.glDeleteFramebuffers(1, fbo, 0);
+            GLES20.glDeleteTextures(1, tex, 0);
+        }
     }
 
     @Override
@@ -309,6 +388,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         surfaceTexture.getTransformMatrix(stMatrix);
         buildTexMatrix();
 
+        // Draw primary preview immediately first, then run optional tiny 32x24 raw sample pass.
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         GLES20.glViewport(0, 0, viewportW, viewportH);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -321,6 +401,41 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
                 frameScaleX, frameScaleY, viewportW, viewportH);
         GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
         drawQuad(previewLocs, cameraTexBuffer);
+
+        sampleTelemetryIfDue();
+    }
+
+    private void sampleTelemetryIfDue() {
+        OnPreviewStatsListener listener = previewStatsListener;
+        if (!telemetryEnabled || listener == null || meterFboId == 0 || meterProgram == 0) {
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (now - lastMeterMs < METER_INTERVAL_MS) {
+            return;
+        }
+        lastMeterMs = now;
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, meterFboId);
+        GLES20.glViewport(0, 0, METER_W, METER_H);
+        GLES20.glUseProgram(meterProgram);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
+        GLES20.glUniform1i(meterLocs.texture, 0);
+        GLES20.glUniform2f(meterLocs.frameScale, frameScaleX, frameScaleY);
+        GLES20.glUniformMatrix4fv(meterLocs.texMatrix, 1, false, texMatrix, 0);
+        drawQuad(meterLocs, cameraTexBuffer);
+
+        meterReadBuffer.position(0);
+        GLES20.glPixelStorei(GLES20.GL_PACK_ALIGNMENT, 1);
+        GLES20.glReadPixels(0, 0, METER_W, METER_H, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, meterReadBuffer);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        GLES20.glViewport(0, 0, viewportW, viewportH);
+
+        meterReadBuffer.position(0);
+        meterReadBuffer.get(meterPixelBytes, 0, METER_W * METER_H * 4);
+        PreviewStats stats = PreviewStats.fromRgbaBytes(meterPixelBytes, METER_W, METER_H, true);
+        view.post(() -> listener.onPreviewStats(stats));
     }
 
     @Override
@@ -337,6 +452,14 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             boolean val = reported;
             view.post(() -> listener.onAxisSwapChanged(val));
         }
+    }
+
+    void setOnPreviewStatsListener(OnPreviewStatsListener listener) {
+        this.previewStatsListener = listener;
+    }
+
+    void setTelemetryEnabled(boolean enabled) {
+        this.telemetryEnabled = enabled;
     }
 
     void setTransform(

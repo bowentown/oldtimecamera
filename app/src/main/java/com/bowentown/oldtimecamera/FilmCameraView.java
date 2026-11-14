@@ -166,6 +166,14 @@ public final class FilmCameraView extends GLSurfaceView {
         renderer.setOnAxisSwapListener(listener);
     }
 
+    public void setOnPreviewStatsListener(GLFilmRenderer.OnPreviewStatsListener listener) {
+        renderer.setOnPreviewStatsListener(listener);
+    }
+
+    public void setTelemetryEnabled(boolean enabled) {
+        renderer.setTelemetryEnabled(enabled);
+    }
+
     public void setCameraTransform(
             boolean hasCameraTransform,
             int infoRotationDegrees,
