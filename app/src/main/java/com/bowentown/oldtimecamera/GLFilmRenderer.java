@@ -336,6 +336,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         this.preset = initialPreset;
         Matrix.setIdentityM(identity, 0);
         Matrix.setIdentityM(stMatrix, 0);
+        Matrix.setIdentityM(texMatrix, 0);
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -708,27 +709,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             drawQuad(photoLocs, photoTexBuffer);
             GLES20.glFinish();
 
-            ByteBuffer byteBuf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder());
-            IntBuffer pixels = byteBuf.asIntBuffer();
-            GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels);
-            checkGlError("glReadPixels");
-
-            int[] srcPixels = new int[w * h];
-            pixels.rewind();
-            pixels.get(srcPixels);
-            int[] argb = new int[w * h];
-            for (int y = 0; y < h; y++) {
-                int row = (h - 1 - y) * w;
-                for (int x = 0; x < w; x++) {
-                    int c = srcPixels[row + x];
-                    int r = c & 0xFF;
-                    int g = (c >>> 8) & 0xFF;
-                    int b = (c >>> 16) & 0xFF;
-                    int a = (c >>> 24) & 0xFF;
-                    argb[y * w + x] = (a << 24) | (r << 16) | (g << 8) | b;
-                }
-            }
-            return Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
+            return readFlippedFboBitmap(w, h);
         } finally {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
@@ -739,6 +720,100 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
                 renderSrc.recycle();
             }
         }
+    }
+
+    /**
+     * Captures the active cropped viewfinder frame (with active film preset) into a small
+     * Bitmap on the GL thread for on-demand AI composition inspection.
+     */
+    Bitmap capturePreviewBitmap(int maxEdge) {
+        if (!hostResumed || surfaceTexture == null || previewProgram == 0
+                || viewportW <= 1 || viewportH <= 1) {
+            return null;
+        }
+        int cap = Math.max(128, Math.min(maxEdge, 768));
+        float scale = (float) cap / Math.max(viewportW, viewportH);
+        int w = Math.max(2, Math.round(viewportW * Math.min(1f, scale)));
+        int h = Math.max(2, Math.round(viewportH * Math.min(1f, scale)));
+
+        int[] tex = new int[1];
+        int[] fbo = new int[1];
+        GLES20.glGenTextures(1, tex, 0);
+        GLES20.glGenFramebuffers(1, fbo, 0);
+        Bitmap full = null;
+        try {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0]);
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, tex[0], 0);
+            if (GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                return null;
+            }
+
+            GLES20.glViewport(0, 0, w, h);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
+            GLES20.glUseProgram(previewProgram);
+            FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
+            applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled, leakSeed,
+                    frameScaleX, frameScaleY, w, h, previewTimeSec);
+            GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
+            drawQuad(previewLocs, cameraTexBuffer);
+            GLES20.glFinish();
+
+            full = readFlippedFboBitmap(w, h);
+            int cropW = Math.max(2, Math.min(w, Math.round(w * frameScaleX)));
+            int cropH = Math.max(2, Math.min(h, Math.round(h * frameScaleY)));
+            if (cropW == w && cropH == h) {
+                Bitmap direct = full;
+                full = null;
+                return direct;
+            }
+            int x0 = Math.max(0, (w - cropW) / 2);
+            int y0 = Math.max(0, (h - cropH) / 2);
+            return Bitmap.createBitmap(full, x0, y0, cropW, cropH);
+        } finally {
+            if (full != null && !full.isRecycled()) {
+                full.recycle();
+            }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            GLES20.glDeleteFramebuffers(1, fbo, 0);
+            GLES20.glDeleteTextures(1, tex, 0);
+            GLES20.glViewport(0, 0, viewportW, viewportH);
+        }
+    }
+
+    private static Bitmap readFlippedFboBitmap(int w, int h) {
+        ByteBuffer byteBuf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder());
+        IntBuffer pixels = byteBuf.asIntBuffer();
+        GLES20.glPixelStorei(GLES20.GL_PACK_ALIGNMENT, 1);
+        GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels);
+        checkGlError("glReadPixels");
+
+        int[] srcPixels = new int[w * h];
+        pixels.rewind();
+        pixels.get(srcPixels);
+        int[] argb = new int[w * h];
+        for (int y = 0; y < h; y++) {
+            int row = (h - 1 - y) * w;
+            for (int x = 0; x < w; x++) {
+                int c = srcPixels[row + x];
+                int r = c & 0xFF;
+                int g = (c >>> 8) & 0xFF;
+                int b = (c >>> 16) & 0xFF;
+                int a = (c >>> 24) & 0xFF;
+                argb[y * w + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+        return Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
     }
 
     // ---------------------------------------------------------------- internals

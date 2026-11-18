@@ -133,6 +133,12 @@ public final class CameraPrefs {
     private static final String KEY_PRACTICE_STEP = "practice_step";
     private static final String KEY_DIAGNOSTICS_LOG = "diagnostics_log";
 
+    private static final String KEY_AI_PROVIDER = "ai_provider";
+    private static final String KEY_AI_BASE_URL = "ai_base_url";
+    private static final String KEY_AI_MODEL = "ai_model";
+    private static final String KEY_AI_VISION = "ai_vision_enabled";
+    private static final String KEY_AI_CRITIQUES_LOG = "ai_critiques_log";
+
     private final SharedPreferences sp;
 
     public CameraPrefs(Context context) {
@@ -434,21 +440,76 @@ public final class CameraPrefs {
 
     public void recordShotDiagnostic(String fileKey, PracticeRoll.ShotDiagnostic diag) {
         if (fileKey == null || fileKey.isEmpty() || diag == null) return;
-        java.util.Map<String, PracticeRoll.ShotDiagnostic> old =
-                PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, ""));
-        java.util.Map<String, PracticeRoll.ShotDiagnostic> updated = new java.util.LinkedHashMap<>();
-        updated.put(fileKey, diag);
-        for (java.util.Map.Entry<String, PracticeRoll.ShotDiagnostic> e : old.entrySet()) {
-            if (updated.size() >= 48) break;
-            if (!fileKey.equals(e.getKey())) {
-                updated.put(e.getKey(), e.getValue());
-            }
-        }
+        java.util.Map<String, PracticeRoll.ShotDiagnostic> updated = putBoundedFirst(
+                fileKey, diag, PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, "")));
         sp.edit().putString(KEY_DIAGNOSTICS_LOG, PracticeRoll.encodeDiagnosticLog(updated)).apply();
     }
 
     public PracticeRoll.ShotDiagnostic getShotDiagnostic(String fileKey) {
         if (fileKey == null || fileKey.isEmpty()) return null;
         return PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, "")).get(fileKey);
+    }
+
+    public AiCoachMath.ProviderPreset getAiProviderPreset() {
+        return AiCoachMath.ProviderPreset.fromName(
+                sp.getString(KEY_AI_PROVIDER, AiCoachMath.ProviderPreset.DEEPSEEK.name()));
+    }
+
+    public void setAiProviderPreset(AiCoachMath.ProviderPreset preset) {
+        AiCoachMath.ProviderPreset safe = preset != null ? preset : AiCoachMath.ProviderPreset.DEEPSEEK;
+        sp.edit().putString(KEY_AI_PROVIDER, safe.name()).apply();
+    }
+
+    public String getAiBaseUrl() {
+        AiCoachMath.ProviderPreset preset = getAiProviderPreset();
+        String raw = sp.getString(KEY_AI_BASE_URL, preset.defaultBaseUrl);
+        return (raw == null || raw.trim().isEmpty()) ? preset.defaultBaseUrl : raw.trim();
+    }
+
+    public void setAiBaseUrl(String baseUrl) {
+        sp.edit().putString(KEY_AI_BASE_URL, baseUrl == null ? "" : baseUrl.trim()).apply();
+    }
+
+    public String getAiModel() {
+        AiCoachMath.ProviderPreset preset = getAiProviderPreset();
+        String raw = sp.getString(KEY_AI_MODEL, preset.defaultModel);
+        return (raw == null || raw.trim().isEmpty()) ? preset.defaultModel : raw.trim();
+    }
+
+    public void setAiModel(String model) {
+        sp.edit().putString(KEY_AI_MODEL, model == null ? "" : model.trim()).apply();
+    }
+
+    public boolean isAiVisionEnabled() {
+        return sp.getBoolean(KEY_AI_VISION, getAiProviderPreset().defaultVision);
+    }
+
+    public void setAiVisionEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_AI_VISION, enabled).apply();
+    }
+
+    public void recordAiCritique(String fileKey, AiCoachMath.AiCritique critique) {
+        if (fileKey == null || fileKey.isEmpty() || critique == null || critique.isEmpty()) return;
+        java.util.Map<String, AiCoachMath.AiCritique> updated = putBoundedFirst(
+                fileKey, critique, AiCoachMath.decodeCritiqueLog(sp.getString(KEY_AI_CRITIQUES_LOG, "")));
+        sp.edit().putString(KEY_AI_CRITIQUES_LOG, AiCoachMath.encodeCritiqueLog(updated)).apply();
+    }
+
+    public AiCoachMath.AiCritique getAiCritique(String fileKey) {
+        if (fileKey == null || fileKey.isEmpty()) return null;
+        return AiCoachMath.decodeCritiqueLog(sp.getString(KEY_AI_CRITIQUES_LOG, "")).get(fileKey);
+    }
+
+    private static <V> java.util.Map<String, V> putBoundedFirst(
+            String key, V value, java.util.Map<String, V> existing) {
+        java.util.Map<String, V> updated = new java.util.LinkedHashMap<>();
+        updated.put(key, value);
+        for (java.util.Map.Entry<String, V> e : existing.entrySet()) {
+            if (updated.size() >= 48) break;
+            if (!key.equals(e.getKey())) {
+                updated.put(e.getKey(), e.getValue());
+            }
+        }
+        return updated;
     }
 }

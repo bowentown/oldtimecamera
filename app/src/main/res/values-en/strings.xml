@@ -167,4 +167,57 @@
     <string name="gallery_frame_desc">Frame %1$d</string>
     <string name="gallery_deleted">Deleted</string>
     <string name="cancel">Cancel</string>
+
+    <string name="sheet_ai">AI ADVISOR</string>
+    <string name="ai_config_entry">BYOK · Model &amp; Key</string>
+    <string name="ai_status_unconfigured">Off</string>
+    <string name="ai_title">AI FILM ADVISOR · BYOK</string>
+    <string name="ai_privacy_note">Key stays encrypted via Android Keystore on device. Requests run only on explicit tap.</string>
+    <string name="ai_provider_deepseek">DeepSeek</string>
+    <string name="ai_provider_qwen">Qwen VL</string>
+    <string name="ai_provider_openai">OpenAI</string>
+    <string name="ai_provider_custom">Custom</string>
+    <string name="ai_label_key">API Key</string>
+    <string name="ai_key_saved_mask">Saved: %1$s</string>
+    <string name="ai_key_missing">Not set</string>
+    <string name="ai_key_hint_new">Enter sk-… API key</string>
+    <string name="ai_key_hint_keep">Leave blank to keep saved key</string>
+    <string name="ai_label_url">Base URL</string>
+    <string name="ai_label_model">Model</string>
+    <string name="ai_label_vision">Send image (off = metadata only)</string>
+    <string name="ai_clear_key">Clear</string>
+    <string name="ai_test">Test</string>
+    <string name="ai_save">Save</string>
+    <string name="ai_testing">Connecting…</string>
+    <string name="ai_test_ok">Connected · %1$d ms</string>
+    <string name="ai_test_fail">Failed: %1$s</string>
+    <string name="ai_saved">AI config saved securely</string>
+    <string name="ai_cleared">API key cleared</string>
+    <string name="ai_err_no_key">Add your API key in Darkroom → AI Advisor first</string>
+    <string name="ai_err_https_required">HTTPS URL required</string>
+    <string name="ai_err_empty_reply">Empty model response</string>
+    <string name="ai_err_parse_recipe">Could not parse film recipe</string>
+
+    <string name="gallery_ai_critique">AI Critique</string>
+    <string name="ai_critique_thinking">AI reviewing print…</string>
+    <string name="ai_critique_title">AI LAB REVIEW</string>
+    <string name="ai_critique_good">GOOD</string>
+    <string name="ai_critique_issue">FIX</string>
+    <string name="ai_critique_next">NEXT</string>
+    <string name="ai_critique_retry">Retry</string>
+
+    <string name="hud_ai_inspire">AI Framing Tip</string>
+    <string name="ai_inspire_thinking">Reading frame…</string>
+    <string name="ai_inspire_failed">AI tip failed: %1$s</string>
+
+    <string name="recipe_ai_btn">✦ AI Mix</string>
+    <string name="ai_recipe_title">AI FILM COLORIST</string>
+    <string name="ai_recipe_hint">Describe mood, light, or cinema vibe…</string>
+    <string name="ai_recipe_tag_1">Rainy Neon</string>
+    <string name="ai_recipe_tag_2">Soft Daylight</string>
+    <string name="ai_recipe_tag_3">Street B&amp;W</string>
+    <string name="ai_recipe_generate">Generate</string>
+    <string name="ai_recipe_generating">Mixing film recipe…</string>
+    <string name="ai_recipe_applied">Loaded: %1$s (%2$s)</string>
+    <string name="ai_recipe_applied_short">AI recipe ready: %1$s</string>
 </resources>

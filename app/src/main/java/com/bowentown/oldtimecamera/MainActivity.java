@@ -102,6 +102,7 @@ public class MainActivity extends ComponentActivity {
     private static final long FEEDBACK_HINT_MS = 1350L;
     private static final long EXPOSURE_HINT_AUTO_FADE_MS = 4800L;
     private static final long POST_REVIEW_MS = 4200L;
+    private static final long AI_INSPIRE_MS = 6500L;
     private static final long QUAD_INTERVAL_MS = 380L;
     private static final long STEADY_WAIT_MAX_MS = 1500L;
     private static final long SNAP_HAPTIC_COOLDOWN_MS = 900L;
@@ -117,11 +118,11 @@ public class MainActivity extends ComponentActivity {
     private MeterStripView meterStrip;
     private TextView rollCounter, dateStampPreview, countdownText;
     private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
-    private TextView assistHintPill, sceneRecommendLabel, postShotReviewPill;
+    private TextView assistHintPill, sceneRecommendLabel, postShotReviewPill, aiInspirePill;
     private TextView recipePanelTitle, recipeIntensityVal, recipeGrainVal, recipeWarmthVal;
     private TextView modePickSingle, modePickDouble, modePickHalf, modePickQuad;
     private LinearLayout sceneRecommendChip, modePickerBar, recipePanel;
-    private ImageButton sceneRecommendClose, poseGuideButton;
+    private ImageButton sceneRecommendClose, poseGuideButton, aiInspireButton;
     private ImageButton flashButton, gridPill, modePill;
     private ImageView timerIcon, thumbnail, thumbPlaceholder;
     private HorizontalScrollView filmStripScroll;
@@ -227,6 +228,9 @@ public class MainActivity extends ComponentActivity {
     private boolean exposureHintAutoFaded = false;
     private SceneClassifier.Recommendation activeRecommendation = null;
     private boolean syncingRecipeSliders = false;
+    private String pendingAiRecipeName = "";
+    private volatile boolean aiInspireBusy = false;
+    private final AtomicInteger aiInspireGen = new AtomicInteger(0);
 
     // Latest CameraX transform metadata + optional user manual calibration.
     private volatile int manualRotation = -1;
@@ -307,6 +311,7 @@ public class MainActivity extends ComponentActivity {
     };
 
     private final Runnable hidePostReviewTask = this::hidePostShotReview;
+    private final Runnable hideAiInspireTask = this::hideAiInspirePill;
 
     private final Runnable autoFadeExposureTask = () -> {
         exposureHintAutoFaded = true;
@@ -432,11 +437,13 @@ public class MainActivity extends ComponentActivity {
         viewfinderOverlay = findViewById(R.id.viewfinderOverlay);
         meterStrip = findViewById(R.id.meterStrip);
         poseGuideButton = findViewById(R.id.poseGuideButton);
+        aiInspireButton = findViewById(R.id.aiInspireButton);
         rollCounter = findViewById(R.id.rollCounter);
         dateStampPreview = findViewById(R.id.dateStamp);
         countdownText = findViewById(R.id.countdownText);
         assistHintPill = findViewById(R.id.assistHintPill);
         postShotReviewPill = findViewById(R.id.postShotReviewPill);
+        aiInspirePill = findViewById(R.id.aiInspirePill);
         sceneRecommendChip = findViewById(R.id.sceneRecommendChip);
         sceneRecommendLabel = findViewById(R.id.sceneRecommendLabel);
         sceneRecommendClose = findViewById(R.id.sceneRecommendClose);
@@ -514,6 +521,9 @@ public class MainActivity extends ComponentActivity {
             updateGuideTemplateUi();
             showTransientHint(poseTemplateLabelRes(guideTemplate));
         });
+
+        aiInspireButton.setOnClickListener(v -> triggerAiInspire());
+        aiInspirePill.setOnClickListener(v -> hideAiInspirePill());
 
         meterStrip.setOnClickListener(v -> {
             boolean show = evPanel.getVisibility() != View.VISIBLE;
@@ -655,6 +665,11 @@ public class MainActivity extends ComponentActivity {
             plp.leftMargin = Math.max(0, Math.round(rect.left)) + FilmUiHelper.dp(this, 8);
             plp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
             poseGuideButton.setLayoutParams(plp);
+
+            FrameLayout.LayoutParams ilp = (FrameLayout.LayoutParams) aiInspireButton.getLayoutParams();
+            ilp.leftMargin = Math.max(0, Math.round(rect.left)) + FilmUiHelper.dp(this, 44);
+            ilp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
+            aiInspireButton.setLayoutParams(ilp);
         });
 
         previewView.setOnAxisSwapListener(swapped -> updateViewfinderAspectRatio(swapped, false));
@@ -781,6 +796,7 @@ public class MainActivity extends ComponentActivity {
         }
 
         FilmPreset base = presets[currentPreset];
+        pendingAiRecipeName = "";
         prefs.setPresetId(base.id);
         applyActiveLookToPreview();
 
@@ -809,7 +825,10 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void wireRecipeSliders() {
+        findViewById(R.id.recipeAiBtn).setOnClickListener(v -> AiRecipeDialog.show(
+                this, prefs, presets[currentPreset].id, this::applyAiRecipeProposal));
         findViewById(R.id.recipeResetBtn).setOnClickListener(v -> {
+            pendingAiRecipeName = "";
             filmRecipe = FilmRecipe.DEFAULT;
             activeCustomRecipeId = "";
             prefs.setActiveCustomRecipeId("");
@@ -874,7 +893,9 @@ public class MainActivity extends ComponentActivity {
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_TEXT);
         input.setSingleLine(true);
-        String defaultName = presets[currentPreset].name + " · " + (savedRecipes.size() + 1);
+        String defaultName = !pendingAiRecipeName.isEmpty()
+                ? pendingAiRecipeName
+                : (presets[currentPreset].name + " · " + (savedRecipes.size() + 1));
         input.setText(defaultName);
         input.setSelection(defaultName.length());
         int pad = FilmUiHelper.dp(this, 20);
@@ -932,6 +953,33 @@ public class MainActivity extends ComponentActivity {
                 .show();
     }
 
+    private void applyAiRecipeProposal(AiCoachMath.AiRecipeProposal proposal) {
+        if (proposal == null) return;
+        int baseIdx = FilmPresets.indexOfId(proposal.basePresetId);
+        applyPresetSelection(baseIdx, false);
+        filmRecipe = proposal.recipe;
+        prefs.setFilmRecipe(filmRecipe);
+        activeCustomRecipeId = "";
+        prefs.setActiveCustomRecipeId("");
+        pendingAiRecipeName = proposal.name;
+        if (blackMistEnabled != proposal.blackMist) {
+            blackMistEnabled = proposal.blackMist;
+            prefs.setBlackMistEnabled(blackMistEnabled);
+        }
+        applyActiveLookToPreview();
+        syncRecipeSlidersFromState();
+        if (!proposal.name.isEmpty()) {
+            recipePanelTitle.setText(proposal.name);
+        }
+        recipePanel.setVisibility(View.VISIBLE);
+        closeBottomDrawers(recipePanel);
+        shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        String msg = !proposal.reason.isEmpty()
+                ? getString(R.string.ai_recipe_applied, proposal.name, proposal.reason)
+                : getString(R.string.ai_recipe_applied_short, proposal.name);
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
     private void closeBottomDrawers(View except) {
         if (evPanel != except && evPanel.getVisibility() == View.VISIBLE) {
             evPanel.setVisibility(View.GONE);
@@ -944,6 +992,7 @@ public class MainActivity extends ComponentActivity {
         }
         if (except != null) {
             hidePostShotReview();
+            hideAiInspirePill();
         }
         updateSceneChipUi();
     }
@@ -1298,7 +1347,8 @@ public class MainActivity extends ComponentActivity {
         boolean drawerOpen = evPanel.getVisibility() == View.VISIBLE
                 || recipePanel.getVisibility() == View.VISIBLE
                 || modePickerBar.getVisibility() == View.VISIBLE
-                || postShotReviewPill.getVisibility() == View.VISIBLE;
+                || postShotReviewPill.getVisibility() == View.VISIBLE
+                || aiInspirePill.getVisibility() == View.VISIBLE;
         boolean shouldShow = assistEnabled && assistScene
                 && activeRecommendation != null
                 && !drawerOpen
@@ -1313,6 +1363,7 @@ public class MainActivity extends ComponentActivity {
                             || recipePanel.getVisibility() == View.VISIBLE
                             || modePickerBar.getVisibility() == View.VISIBLE
                             || postShotReviewPill.getVisibility() == View.VISIBLE
+                            || aiInspirePill.getVisibility() == View.VISIBLE
                             || !assistEnabled || !assistScene) {
                         sceneRecommendChip.setVisibility(View.GONE);
                     }
@@ -1338,6 +1389,7 @@ public class MainActivity extends ComponentActivity {
             return;
         }
         mainHandler.removeCallbacks(hidePostReviewTask);
+        hideAiInspirePill();
         postShotReviewPill.setText(diag.singleLine());
         postShotReviewPill.setTextColor(getColor(
                 diag.missionPassed && practiceTheme != null ? R.color.amber_led : R.color.paper));
@@ -1354,6 +1406,93 @@ public class MainActivity extends ComponentActivity {
         postShotReviewPill.animate().cancel();
         postShotReviewPill.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
             postShotReviewPill.setVisibility(View.GONE);
+            updateSceneChipUi();
+        }).start();
+    }
+
+    private void triggerAiInspire() {
+        if (aiInspireBusy) return;
+        if (!AiKeyStore.hasApiKey(this)) {
+            AiSettingsDialog.show(this, prefs, this::triggerAiInspire);
+            return;
+        }
+        closeBottomDrawers(null);
+        hidePostShotReview();
+        aiInspireBusy = true;
+        final int gen = aiInspireGen.incrementAndGet();
+        aiInspireButton.setAlpha(0.45f);
+        showAiInspirePill(getString(R.string.ai_inspire_thinking), false);
+
+        final PreviewStats statsSnapshot = latestStats;
+        final float tiltSnapshot = latestTiltDeg;
+        final String presetName = presets[currentPreset].name;
+        final String aspectLabel = aspectRatio.label;
+        final boolean zh = isChineseLocale();
+        final boolean wantVision = prefs.isAiVisionEnabled();
+
+        new Thread(() -> {
+            Bitmap snapshot = null;
+            String tip = null;
+            String err = null;
+            try {
+                if (wantVision) {
+                    snapshot = previewView.capturePreviewSnapshot(512);
+                }
+                tip = AiCoachClient.inspireViewfinder(
+                        this, prefs, snapshot, statsSnapshot, tiltSnapshot,
+                        presetName, aspectLabel, zh);
+            } catch (Exception e) {
+                err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            } finally {
+                if (snapshot != null && !snapshot.isRecycled()) {
+                    snapshot.recycle();
+                }
+            }
+            final String finalTip = tip;
+            final String finalErr = err;
+            runOnUiThread(() -> {
+                aiInspireBusy = false;
+                aiInspireButton.setAlpha(0.82f);
+                if (!isActivityResumed || isDestroyed() || isFinishing() || gen != aiInspireGen.get()) {
+                    return;
+                }
+                if (finalTip != null && !finalTip.isEmpty()) {
+                    shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    showAiInspirePill(finalTip, true);
+                } else {
+                    hideAiInspirePill();
+                    Toast.makeText(this,
+                            getString(R.string.ai_inspire_failed, String.valueOf(finalErr)),
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "otc-ai-inspire").start();
+    }
+
+    private void showAiInspirePill(String text, boolean autoFade) {
+        if (aiInspirePill == null || text == null || text.isEmpty()) return;
+        if (evPanel.getVisibility() == View.VISIBLE || recipePanel.getVisibility() == View.VISIBLE
+                || modePickerBar.getVisibility() == View.VISIBLE) {
+            return;
+        }
+        mainHandler.removeCallbacks(hideAiInspireTask);
+        aiInspirePill.setText(text);
+        aiInspirePill.setTextColor(getColor(autoFade ? R.color.amber_led : R.color.paper_soft));
+        aiInspirePill.animate().cancel();
+        aiInspirePill.setVisibility(View.VISIBLE);
+        aiInspirePill.animate().alpha(1f).setDuration(180L).start();
+        updateSceneChipUi();
+        if (autoFade) {
+            mainHandler.postDelayed(hideAiInspireTask, AI_INSPIRE_MS);
+        }
+    }
+
+    private void hideAiInspirePill() {
+        mainHandler.removeCallbacks(hideAiInspireTask);
+        if (aiInspirePill == null || aiInspirePill.getVisibility() != View.VISIBLE) return;
+        aiInspirePill.animate().cancel();
+        aiInspirePill.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
+            aiInspirePill.setVisibility(View.GONE);
             updateSceneChipUi();
         }).start();
     }
@@ -2952,6 +3091,11 @@ public class MainActivity extends ComponentActivity {
         mainHandler.removeCallbacks(clearTransientHintTask);
         mainHandler.removeCallbacks(autoFadeExposureTask);
         mainHandler.removeCallbacks(hidePostReviewTask);
+        mainHandler.removeCallbacks(hideAiInspireTask);
+        aiInspireGen.incrementAndGet();
+        aiInspireBusy = false;
+        hideAiInspirePill();
+        if (aiInspireButton != null) aiInspireButton.setAlpha(0.82f);
         endScreenFlash();
         if (orientationListener != null) {
             orientationListener.disable();

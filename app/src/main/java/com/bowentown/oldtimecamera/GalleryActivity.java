@@ -69,6 +69,9 @@ public final class GalleryActivity extends ComponentActivity {
     private View lightboxOverlay;
     private ImageView lightboxImage;
     private TextView lightboxTitle, lightboxMeta;
+    private View lightboxAiCard, lightboxAiRows;
+    private TextView lightboxAiStatus, lightboxAiGood, lightboxAiIssue, lightboxAiNext;
+    private boolean aiBusy = false;
 
     private CameraPrefs prefs;
     private FrameAdapter adapter;
@@ -118,6 +121,12 @@ public final class GalleryActivity extends ComponentActivity {
         lightboxImage = findViewById(R.id.lightboxImage);
         lightboxTitle = findViewById(R.id.lightboxTitle);
         lightboxMeta = findViewById(R.id.lightboxMeta);
+        lightboxAiCard = findViewById(R.id.lightboxAiCard);
+        lightboxAiRows = findViewById(R.id.lightboxAiRows);
+        lightboxAiStatus = findViewById(R.id.lightboxAiStatus);
+        lightboxAiGood = findViewById(R.id.lightboxAiGood);
+        lightboxAiIssue = findViewById(R.id.lightboxAiIssue);
+        lightboxAiNext = findViewById(R.id.lightboxAiNext);
 
         adapter = new FrameAdapter();
         gridView.setAdapter(adapter);
@@ -129,6 +138,9 @@ public final class GalleryActivity extends ComponentActivity {
         findViewById(R.id.lightboxClose).setOnClickListener(v -> closeLightbox());
         findViewById(R.id.lightboxShare).setOnClickListener(v -> shareCurrent());
         findViewById(R.id.lightboxDelete).setOnClickListener(v -> confirmDeleteCurrent());
+        findViewById(R.id.lightboxAiCritique).setOnClickListener(v -> onAiCritiqueTapped());
+        findViewById(R.id.lightboxAiRetry).setOnClickListener(v -> requestAiCritique(true));
+        findViewById(R.id.lightboxAiDismiss).setOnClickListener(v -> lightboxAiCard.setVisibility(View.GONE));
 
         setupLightboxSwipe();
         loadPhotos();
@@ -239,12 +251,14 @@ public final class GalleryActivity extends ComponentActivity {
         lightboxTitle.setText(String.format(Locale.US, "%d / %d  ·  %s",
                 index + 1, items.size(), dateLabel));
         lightboxMeta.setVisibility(View.GONE);
+        lightboxAiCard.setVisibility(View.GONE);
         lightboxOverlay.setVisibility(View.VISIBLE);
 
         worker.execute(() -> {
             Bitmap bmp = PhotoSaver.decodeScaledUri(this, item.uri, 2048);
             String exifSummary = PhotoSaver.readDisplayExifSummary(this, item.uri);
             PracticeRoll.ShotDiagnostic diag = prefs.getShotDiagnostic(item.uri.toString());
+            AiCoachMath.AiCritique cachedAi = prefs.getAiCritique(item.uri.toString());
             StringBuilder meta = new StringBuilder();
             if (!exifSummary.isEmpty()) meta.append(exifSummary);
             if (diag != null) {
@@ -264,13 +278,109 @@ public final class GalleryActivity extends ComponentActivity {
                     lightboxMeta.setText(metaText);
                     lightboxMeta.setVisibility(View.VISIBLE);
                 }
+                if (cachedAi != null) {
+                    showCritiqueCard(cachedAi);
+                }
                 if (old != null && !old.isRecycled()) old.recycle();
             });
         });
     }
 
+    private void onAiCritiqueTapped() {
+        if (lightboxIndex < 0 || lightboxIndex >= items.size()) return;
+        if (!AiKeyStore.hasApiKey(this)) {
+            AiSettingsDialog.show(this, prefs, () -> requestAiCritique(true));
+            return;
+        }
+        String key = items.get(lightboxIndex).uri.toString();
+        AiCoachMath.AiCritique cached = prefs.getAiCritique(key);
+        if (cached != null) {
+            if (lightboxAiCard.getVisibility() == View.VISIBLE) {
+                lightboxAiCard.setVisibility(View.GONE);
+            } else {
+                showCritiqueCard(cached);
+            }
+            return;
+        }
+        requestAiCritique(false);
+    }
+
+    private void requestAiCritique(boolean forceRefresh) {
+        if (aiBusy || lightboxIndex < 0 || lightboxIndex >= items.size()) return;
+        if (!AiKeyStore.hasApiKey(this)) {
+            AiSettingsDialog.show(this, prefs, () -> requestAiCritique(true));
+            return;
+        }
+        final int targetIdx = lightboxIndex;
+        final PhotoSaver.PhotoItem item = items.get(targetIdx);
+        final String key = item.uri.toString();
+        if (!forceRefresh) {
+            AiCoachMath.AiCritique cached = prefs.getAiCritique(key);
+            if (cached != null) {
+                showCritiqueCard(cached);
+                return;
+            }
+        }
+        aiBusy = true;
+        lightboxAiRows.setVisibility(View.GONE);
+        lightboxAiStatus.setText(R.string.ai_critique_thinking);
+        lightboxAiStatus.setTextColor(getColor(R.color.paper_soft));
+        lightboxAiStatus.setVisibility(View.VISIBLE);
+        lightboxAiCard.setVisibility(View.VISIBLE);
+
+        boolean zh = getResources().getConfiguration().getLocales().get(0)
+                .getLanguage().startsWith("zh");
+        worker.execute(() -> {
+            Bitmap scaled = null;
+            AiCoachMath.AiCritique critique = null;
+            String err = null;
+            try {
+                if (prefs.isAiVisionEnabled()) {
+                    scaled = PhotoSaver.decodeScaledUri(this, item.uri, 768);
+                }
+                String exif = PhotoSaver.readDisplayExifSummary(this, item.uri);
+                PracticeRoll.ShotDiagnostic diag = prefs.getShotDiagnostic(key);
+                String diagLine = diag != null ? diag.singleLine() : "";
+                critique = AiCoachClient.critiquePhoto(this, prefs, scaled, exif, diagLine, zh);
+                prefs.recordAiCritique(key, critique);
+            } catch (Exception e) {
+                err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            } finally {
+                if (scaled != null && !scaled.isRecycled()) scaled.recycle();
+            }
+            final AiCoachMath.AiCritique res = critique;
+            final String failure = err;
+            main.post(() -> {
+                aiBusy = false;
+                if (isFinishing() || isDestroyed() || lightboxIndex != targetIdx) return;
+                if (res != null) {
+                    showCritiqueCard(res);
+                } else {
+                    lightboxAiRows.setVisibility(View.GONE);
+                    lightboxAiStatus.setText(String.valueOf(failure));
+                    lightboxAiStatus.setTextColor(getColor(R.color.accent));
+                    lightboxAiStatus.setVisibility(View.VISIBLE);
+                    lightboxAiCard.setVisibility(View.VISIBLE);
+                }
+            });
+        });
+    }
+
+    private void showCritiqueCard(AiCoachMath.AiCritique c) {
+        lightboxAiStatus.setVisibility(View.GONE);
+        lightboxAiRows.setVisibility(View.VISIBLE);
+        lightboxAiGood.setText(getString(R.string.ai_critique_good) + " · " + c.strength);
+        lightboxAiIssue.setText(getString(R.string.ai_critique_issue) + " · " + c.issue);
+        lightboxAiNext.setText(getString(R.string.ai_critique_next) + " · " + c.nextAction);
+        lightboxAiGood.setVisibility(c.strength.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiIssue.setVisibility(c.issue.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiNext.setVisibility(c.nextAction.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiCard.setVisibility(View.VISIBLE);
+    }
+
     private void closeLightbox() {
         lightboxOverlay.setVisibility(View.GONE);
+        lightboxAiCard.setVisibility(View.GONE);
         lightboxIndex = -1;
         lightboxImage.setImageDrawable(null);
         if (lightboxBitmap != null && !lightboxBitmap.isRecycled()) {

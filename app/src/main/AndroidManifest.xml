@@ -3,7 +3,7 @@
 
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Only used by the user-initiated "check update" flow (GitHub Releases API). -->
+    <!-- Used only by explicit user taps: UpdateChecker (GitHub Releases) and BYOK AI advisor. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required to hand a downloaded APK to the system installer on Android 8+. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />

@@ -309,6 +309,33 @@ public final class FilmCameraView extends GLSurfaceView {
         return result[0];
     }
 
+    /** Captures a lightweight preview snapshot on the GL thread without blocking capture hardware. */
+    public Bitmap capturePreviewSnapshot(int maxEdge) {
+        if (!isAttachedToWindow() || renderer.initError() != null) {
+            return null;
+        }
+        final Bitmap[] result = new Bitmap[1];
+        final CountDownLatch latch = new CountDownLatch(1);
+        renderer.postTask(() -> {
+            try {
+                result[0] = renderer.capturePreviewBitmap(maxEdge);
+            } catch (Throwable ignored) {
+                result[0] = null;
+            } finally {
+                latch.countDown();
+            }
+        });
+        try {
+            if (!latch.await(3, TimeUnit.SECONDS)) {
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        return result[0];
+    }
+
     /** Driver-safe maximum edge for a developed print, queried once the GL context exists. */
     public int getMaxRenderEdge() {
         return renderer.maxRenderEdge();

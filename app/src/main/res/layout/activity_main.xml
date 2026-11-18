@@ -131,6 +131,21 @@
                     android:src="@drawable/ic_pose_guide"
                     android:tint="@color/paper" />
 
+                <ImageButton
+                    android:id="@+id/aiInspireButton"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="bottom|start"
+                    android:layout_marginStart="44dp"
+                    android:layout_marginBottom="8dp"
+                    android:alpha="0.82"
+                    android:background="@drawable/bg_round_button"
+                    android:contentDescription="@string/hud_ai_inspire"
+                    android:padding="6dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_sparkle"
+                    android:tint="@color/amber_led" />
+
                 <TextView
                     android:id="@+id/dateStamp"
                     style="@style/TextMonoStamp"
@@ -268,6 +283,29 @@
                 android:ellipsize="end"
                 android:visibility="gone" />
 
+            <!-- On-demand AI framing inspiration pill (tap-triggered only) -->
+            <TextView
+                android:id="@+id/aiInspirePill"
+                style="@style/TextCaption"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="12dp"
+                android:alpha="0"
+                android:background="@drawable/bg_assist_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:lineSpacingExtra="2dp"
+                android:maxLines="2"
+                android:maxWidth="308dp"
+                android:paddingStart="14dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="6dp"
+                android:textColor="@color/amber_led"
+                android:visibility="gone" />
+
             <!-- Long-press shooting mode bar (1x / 2x / 1/2 / 4F) -->
             <LinearLayout
                 android:id="@+id/modePickerBar"
@@ -312,7 +350,7 @@
             <!-- Inline Film Recipe drawer (long-press any stock chip) -->
             <LinearLayout
                 android:id="@+id/recipePanel"
-                android:layout_width="276dp"
+                android:layout_width="312dp"
                 android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal"
                 android:layout_marginBottom="12dp"
@@ -337,17 +375,32 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:singleLine="true"
                         android:textColor="@color/paper" />
+
+                    <TextView
+                        android:id="@+id/recipeAiBtn"
+                        style="@style/TextMonoCaption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="24dp"
+                        android:background="@drawable/bg_pill_ripple"
+                        android:gravity="center"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:text="@string/recipe_ai_btn"
+                        android:textColor="@color/amber_led" />
 
                     <TextView
                         android:id="@+id/recipeResetBtn"
                         style="@style/TextMonoCaption"
                         android:layout_width="wrap_content"
                         android:layout_height="24dp"
+                        android:layout_marginStart="2dp"
                         android:background="@drawable/bg_pill_ripple"
                         android:gravity="center"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
                         android:text="@string/recipe_reset"
                         android:textColor="@color/paper_dim" />
 
@@ -356,13 +409,13 @@
                         style="@style/TextMonoCaption"
                         android:layout_width="wrap_content"
                         android:layout_height="24dp"
-                        android:layout_marginStart="4dp"
+                        android:layout_marginStart="2dp"
                         android:background="@drawable/bg_pill_ripple"
                         android:gravity="center"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
                         android:text="@string/recipe_save"
-                        android:textColor="@color/amber_led" />
+                        android:textColor="@color/paper" />
                 </LinearLayout>
 
                 <LinearLayout

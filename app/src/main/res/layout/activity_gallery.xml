@@ -159,6 +159,111 @@
             android:textColor="@color/paper_soft"
             android:visibility="gone" />
 
+        <!-- Collapsible BYOK AI Critique card -->
+        <LinearLayout
+            android:id="@+id/lightboxAiCard"
+            android:layout_width="316dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="104dp"
+            android:background="@drawable/bg_sheet"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="12dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <ImageView
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:layout_marginEnd="6dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_sparkle"
+                    android:tint="@color/amber_led" />
+
+                <TextView
+                    style="@style/TextMonoCaption"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/ai_critique_title"
+                    android:textColor="@color/amber_led" />
+
+                <TextView
+                    android:id="@+id/lightboxAiRetry"
+                    style="@style/TextMonoCaption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="24dp"
+                    android:background="@drawable/bg_pill_ripple"
+                    android:gravity="center"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:text="@string/ai_critique_retry"
+                    android:textColor="@color/paper_dim" />
+
+                <ImageButton
+                    android:id="@+id/lightboxAiDismiss"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginStart="2dp"
+                    android:background="@drawable/bg_hud_icon_button"
+                    android:contentDescription="@string/close"
+                    android:padding="5dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_close"
+                    android:tint="@color/paper_dim" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/lightboxAiStatus"
+                style="@style/TextCaption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/paper_soft"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/lightboxAiRows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/lightboxAiGood"
+                    style="@style/TextCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="@color/paper" />
+
+                <TextView
+                    android:id="@+id/lightboxAiIssue"
+                    style="@style/TextCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="@color/paper_soft" />
+
+                <TextView
+                    android:id="@+id/lightboxAiNext"
+                    style="@style/TextCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="2dp"
+                    android:textColor="@color/amber_led" />
+            </LinearLayout>
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="56dp"
@@ -235,8 +340,8 @@
                 android:background="@drawable/bg_hud_icon_button"
                 android:gravity="center"
                 android:orientation="horizontal"
-                android:paddingStart="14dp"
-                android:paddingEnd="10dp">
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp">
 
                 <ImageView
                     android:layout_width="18dp"
@@ -248,9 +353,39 @@
                     style="@style/TextMonoLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="6dp"
                     android:text="@string/gallery_delete"
                     android:textColor="@color/paper_dim" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="16dp"
+                android:background="@color/hairline" />
+
+            <LinearLayout
+                android:id="@+id/lightboxAiCritique"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_hud_icon_button"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="10dp">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_sparkle"
+                    android:tint="@color/amber_led" />
+
+                <TextView
+                    style="@style/TextMonoLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/gallery_ai_critique"
+                    android:textColor="@color/amber_led" />
             </LinearLayout>
         </LinearLayout>
     </FrameLayout>

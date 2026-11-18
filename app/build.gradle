@@ -29,8 +29,8 @@ android {
         applicationId 'com.bowentown.oldtimecamera'
         minSdk 26
         targetSdk 35
-        versionCode 7
-        versionName '1.5.0'
+        versionCode 8
+        versionName '1.6.0'
         resConfigs 'zh', 'en'
     }
 
@@ -47,7 +47,10 @@ android {
 
     buildTypes {
         debug {
-            // Keep the debug APK small enough to share, no extra flavour needed.
+            // Give debug its own package id so debug and release builds coexist and
+            // release updates never fail with signature conflicts.
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
         }
         release {
             // The shipped artifact is minified: the film recipes and GLSL are the product.

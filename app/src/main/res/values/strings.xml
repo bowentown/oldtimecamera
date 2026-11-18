@@ -167,4 +167,57 @@
     <string name="gallery_frame_desc">第 %1$d 格</string>
     <string name="gallery_deleted">已删</string>
     <string name="cancel">取消</string>
+
+    <string name="sheet_ai">AI 胶片顾问</string>
+    <string name="ai_config_entry">BYOK · 模型与密钥</string>
+    <string name="ai_status_unconfigured">未配置</string>
+    <string name="ai_title">AI 胶片顾问 · 自带 Key</string>
+    <string name="ai_privacy_note">API Key 经系统 Keystore 加密存本机；仅在你点击 AI 按钮时发起一次请求，不后台扫描。</string>
+    <string name="ai_provider_deepseek">DeepSeek</string>
+    <string name="ai_provider_qwen">千问 VL</string>
+    <string name="ai_provider_openai">OpenAI</string>
+    <string name="ai_provider_custom">自定义</string>
+    <string name="ai_label_key">API Key</string>
+    <string name="ai_key_saved_mask">已存：%1$s</string>
+    <string name="ai_key_missing">未保存</string>
+    <string name="ai_key_hint_new">输入 sk-… 密钥</string>
+    <string name="ai_key_hint_keep">留空则保留已加密密钥</string>
+    <string name="ai_label_url">Base URL</string>
+    <string name="ai_label_model">Model</string>
+    <string name="ai_label_vision">传图看片（关闭则仅传参数）</string>
+    <string name="ai_clear_key">清密钥</string>
+    <string name="ai_test">测连通</string>
+    <string name="ai_save">保存</string>
+    <string name="ai_testing">连接中…</string>
+    <string name="ai_test_ok">连通成功 · %1$d ms</string>
+    <string name="ai_test_fail">连接失败：%1$s</string>
+    <string name="ai_saved">AI 配置已加密保存</string>
+    <string name="ai_cleared">已清除本机 API Key</string>
+    <string name="ai_err_no_key">请先在「暗房 → AI 胶片顾问」填入 API Key</string>
+    <string name="ai_err_https_required">仅支持 HTTPS 地址（或 localhost 测试）</string>
+    <string name="ai_err_empty_reply">模型返回为空，请检查模型名与权限</string>
+    <string name="ai_err_parse_recipe">未能解析配方参数，请重试</string>
+
+    <string name="gallery_ai_critique">AI 点评</string>
+    <string name="ai_critique_thinking">AI 看片点评中…</string>
+    <string name="ai_critique_title">AI 暗房复盘</string>
+    <string name="ai_critique_good">亮点</string>
+    <string name="ai_critique_issue">遗憾</string>
+    <string name="ai_critique_next">下张</string>
+    <string name="ai_critique_retry">重评</string>
+
+    <string name="hud_ai_inspire">AI 灵感</string>
+    <string name="ai_inspire_thinking">AI 观察取景中…</string>
+    <string name="ai_inspire_failed">AI 灵感失败：%1$s</string>
+
+    <string name="recipe_ai_btn">✦ AI 调色</string>
+    <string name="ai_recipe_title">AI 胶片配方师</string>
+    <string name="ai_recipe_hint">描述想要的色调、光线或电影感…</string>
+    <string name="ai_recipe_tag_1">雨夜霓虹</string>
+    <string name="ai_recipe_tag_2">日系清透</string>
+    <string name="ai_recipe_tag_3">复古黑白</string>
+    <string name="ai_recipe_generate">生成配方</string>
+    <string name="ai_recipe_generating">正在调制胶片配方…</string>
+    <string name="ai_recipe_applied">已试用：%1$s（%2$s）</string>
+    <string name="ai_recipe_applied_short">已载入 AI 配方：%1$s</string>
 </resources>

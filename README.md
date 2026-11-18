@@ -1,9 +1,9 @@
 # 旧时光相机 · Old Time Camera
 
-一个克制、优雅的 Android 纯本地胶片相机（`v1.5.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
+一个克制、优雅的 Android 纯本地胶片相机（`v1.6.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
 实时预览与全分辨率成片共用同一套 OpenGL ES 片元着色器，拍摄或导入洗印后叠上相纸边框、编号与复古橙色日期背印，写入系统相册并保留相机拍摄 EXIF 元数据。
 
-纯本地存储、无账号、无统计/广告 SDK。唯一的网络访问由你主动触发：暗房面板里的「检查更新」会请求本仓库的 GitHub Releases API，其余任何功能都不会联网。
+默认全离线运行、无账号、无统计/广告 SDK。网络访问**仅在用户主动点击**时发生：暗房面板里的「检查更新」（GitHub Releases API）与可选的 **BYOK AI 胶片顾问**（支持自带 DeepSeek / 通义千问 VL / OpenAI / 自定义兼容接口 API Key，经 `AndroidKeyStore` 加密保存在本机，绝不后台扫描或偷跑流量）。
 
 ---
 
@@ -18,6 +18,10 @@
   - **底栏测光表与直方条（`MeterStripView`）**：在主控胶囊上方展示 12 档实时亮度分布柱与 `-2..0..+2` 机械风格测光指针，点击即可联动展开 EV 滑条。
   - **智能曝光提示（单行轻点一键修正）**：`GLFilmRenderer` 每 ~300ms 从主预览流中额外下采样一帧未套滤镜的 `32×24` 原始帧，纯 Java `ExposureAdvisor` 识别「太亮 · 下拉 EV / 偏暗 · 上推 EV / 逆光 · 点主体测光」；单行浮现且可点击直接调整 EV 或对主体测光，无操作自动淡出且从不堆叠多层气泡。
   - **暗房「新手三卷入门挑战」（6 格微任务）+ 拍后一句话微复盘**：可在暗房面板「摄影练习卷」随时领用《三分与留白》《光线与测光》《水平与街头》三卷入门挑战（每卷 6 格）；按 *One-Change Rule* 在快门成像后通过底栏胶囊与底片灯箱附上一句简洁拍摄诊断，绝不弹窗阻断连拍。
+  - **可选 AI 胶片顾问（BYOK · 支持 DeepSeek `deepseek-flash` 及自定义兼容接口）**：
+    - **按需取景灵感**：取景器左下角仅在点按时抓取一帧当前画幅（或仅传光表参数）询问视觉模型，返回一句不超过 24 字的可执行构图/机位提示，绝不后台轮询消耗额度。
+    - **一句话 AI 调色配方师**：长按底栏胶片胶囊呼出配方面板点 `✦ AI 调色`，输入电影感/光线描述即可联动匹配基底胶片、浓度/颗粒/冷暖与黑柔光开关并实时预览。
+    - **暗房灯箱 AI 复盘**：在底片灯箱点 `AI 点评`，结合成片与 EXIF 输出「亮点 / 遗憾 / 下张尝试」三句简洁教练点评并本地缓存结果。
   - **场景识别推荐胶片（仅推荐，永不自动换片）**：纯 Java `SceneClassifier` 结合暗场/人脸/逆光/金黄时刻/冷调阴天/高饱和风光/低饱和黑白共 6 类信号与通用态，在胶片条上方轻提示可忽略的 `试试 …` 胶囊，点按试片或点 `×` 忽略当前场景，绝不强行切走用户选片；镜头被遮挡或有效帧缺失时不会误判为夜景。
   - **手抖提示 & 稳拍快门**：`StabilityMeter` 基于陀螺仪角速率滑动窗口 RMS（无陀螺仪设备自动回退高通滤波加速度计）识别手抖并单行提示 `拿稳一点`；样本不足 3 帧时不会误判为「稳」，快门直接放行。开启「稳拍快门」后，手抖状态下按快门会在快门外环绘制最长 `1.5s` 的琥珀等待弧，一旦持稳、到达超时或再次点按快门立即成像（切镜头或退后台自动取消）。
 - **十卷自有命名胶片**（色彩矩阵 + S 曲线 + 双重银盐颗粒 + Halation 高光晕 + 光学暗角 + 漏光 + 配套相纸）：
@@ -73,7 +77,7 @@
 |---|---|
 | `CAMERA` | 取景与拍摄 |
 | `WRITE_EXTERNAL_STORAGE`（`maxSdkVersion=28`） | Android 8/9 写入相册 |
-| `INTERNET` | 仅「检查更新」时访问 GitHub Releases API |
+| `INTERNET` | 仅在用户主动点击「检查更新」或「AI 胶片顾问」时发起 HTTPS 请求 |
 | `REQUEST_INSTALL_PACKAGES` | 把下载好的更新交给系统安装器 |
 
 没有定位、通讯录、电话状态、存储读取（Android 10+ 走 Scoped Storage）等任何其他权限。
@@ -85,7 +89,7 @@
 需要 JDK 17、Android SDK（platform 36 + build-tools 36.0.0），并配置 `ANDROID_HOME` / `local.properties`：
 
 ```bash
-./gradlew testDebugUnitTest  # 运行 10 个 JVM 单元测试类（54 项测试）
+./gradlew testDebugUnitTest  # 运行 11 个 JVM 单元测试类（60 项测试）
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 需 keystore.properties，否则产出 unsigned 包
 ```
@@ -133,10 +137,15 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── PhotoSaver.java             裁切、Screen/半格/4格拼拍、35mm 齿孔与相纸排版、EXIF/配方、联系表
 ├── CameraPrefs.java            胶卷计数、模式/网格/线稿/配方/练习卷/诊断记录持久化
 ├── FilmUiHelper.java           安全区适配、字体加载与内置/自定义胶片色卡条
+├── AiCoachMath.java            BYOK AI 端点归一化、Key 脱敏、提示词与 JSON 容错解析（纯 Java）
+├── AiKeyStore.java             AndroidKeyStore AES-GCM 硬件加密存储用户 API Key
+├── AiCoachClient.java          零第三方依赖 HTTPS 客户端（支持 DeepSeek Vision 与纯文本退化）
+├── AiSettingsDialog.java       暗房 BYOK 模型与密钥设置弹窗（支持连通测试）
+├── AiRecipeDialog.java         一句话自然语言调胶片配方弹窗
 ├── LicenseDialog.java          APK 内 MIT / OFL / NOTICE 查看
 └── UpdateChecker.java          GitHub Releases 检查更新与证书校验安装
 app/src/main/assets/licenses/   MIT、OFL、NOTICE 全文（随 APK 分发）
-app/src/test/java/com/bowentown/oldtimecamera/   10 个纯 JVM 测试类（54 项测试）
+app/src/test/java/com/bowentown/oldtimecamera/   11 个纯 JVM 测试类（60 项测试）
 LICENSES/                       仓库侧第三方许可全文
 NOTICE                          专有声明 + 第三方资产例外 + 商标说明
 docs/                           OFL 原文与开源项目调研
