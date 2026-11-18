@@ -27,6 +27,99 @@ public final class CompositionMath {
         }
     }
 
+    /** Minimalist vector framing & pose line-art templates inside the optical viewfinder. */
+    public enum GuideTemplate {
+        NONE,
+        PORTRAIT_THIRDS,
+        BACK_SILHOUETTE,
+        LOW_ANGLE,
+        SYMMETRY,
+        OVERHEAD_STILL,
+        GOLDEN_DIAGONAL;
+
+        public GuideTemplate next() {
+            GuideTemplate[] vals = values();
+            return vals[(ordinal() + 1) % vals.length];
+        }
+
+        public static GuideTemplate fromName(String name) {
+            if (name != null) {
+                for (GuideTemplate t : values()) {
+                    if (t.name().equals(name)) return t;
+                }
+            }
+            return NONE;
+        }
+    }
+
+    /** One normalized [0..1] geometric primitive for pose/framing guide templates. */
+    public static final class GuideShape {
+        public enum Kind { LINE, DASHED_LINE, OVAL, ARC }
+
+        public final Kind kind;
+        public final float a, b, c, d;
+        public final float startDeg, sweepDeg;
+
+        private GuideShape(Kind kind, float a, float b, float c, float d,
+                           float startDeg, float sweepDeg) {
+            this.kind = kind;
+            this.a = a;
+            this.b = b;
+            this.c = c;
+            this.d = d;
+            this.startDeg = startDeg;
+            this.sweepDeg = sweepDeg;
+        }
+
+        public static GuideShape line(float x1, float y1, float x2, float y2) {
+            return new GuideShape(Kind.LINE, x1, y1, x2, y2, 0f, 0f);
+        }
+
+        public static GuideShape dashed(float x1, float y1, float x2, float y2) {
+            return new GuideShape(Kind.DASHED_LINE, x1, y1, x2, y2, 0f, 0f);
+        }
+
+        public static GuideShape oval(float left, float top, float right, float bottom) {
+            return new GuideShape(Kind.OVAL, left, top, right, bottom, 0f, 0f);
+        }
+
+        public static GuideShape arc(float left, float top, float right, float bottom,
+                                     float startDeg, float sweepDeg) {
+            return new GuideShape(Kind.ARC, left, top, right, bottom, startDeg, sweepDeg);
+        }
+    }
+
+    /** Real-time spatial guidance from subject anchor toward the best composition anchor. */
+    public static final class FramingAdvice {
+        public final boolean hasSubject;
+        public final boolean locked;
+        public final float subjectX;
+        public final float subjectY;
+        public final float targetX;
+        public final float targetY;
+        public final float distance;
+        public final boolean showArrow;
+        public final boolean headroomTight;
+
+        FramingAdvice(boolean hasSubject, boolean locked,
+                      float subjectX, float subjectY,
+                      float targetX, float targetY,
+                      float distance, boolean showArrow, boolean headroomTight) {
+            this.hasSubject = hasSubject;
+            this.locked = locked;
+            this.subjectX = subjectX;
+            this.subjectY = subjectY;
+            this.targetX = targetX;
+            this.targetY = targetY;
+            this.distance = distance;
+            this.showArrow = showArrow;
+            this.headroomTight = headroomTight;
+        }
+
+        public static final FramingAdvice EMPTY =
+                new FramingAdvice(false, false, 0.5f, 0.5f, 0.5f, 0.5f, 0f, false, false);
+    }
+
     public static final float INV_PHI = 0.61803398875f;
     public static final float REM_PHI = 1f - INV_PHI;
 
@@ -358,6 +451,113 @@ public final class CompositionMath {
         float ay = (vy - rectTop) / rectHeight;
         if (ax < 0f || ax > 1f || ay < 0f || ay > 1f) return null;
         return new float[]{ax, ay};
+    }
+
+    /** Evaluates real-time subject offset toward the nearest composition power point and headroom. */
+    public static FramingAdvice evaluateFraming(
+            float subX,
+            float subY,
+            boolean hasFace,
+            float faceTopNorm,
+            GridMode gridMode,
+            int goldenRotation,
+            int lockedPointIndex) {
+        if (Float.isNaN(subX) || Float.isNaN(subY)) {
+            return FramingAdvice.EMPTY;
+        }
+        float sx = clamp01(subX);
+        float sy = clamp01(subY);
+        boolean headroomTight = hasFace && !Float.isNaN(faceTopNorm) && faceTopNorm < 0.085f;
+
+        GridMode evalMode = (gridMode != null && gridMode != GridMode.OFF)
+                ? gridMode : GridMode.THIRDS;
+        float[][] pts = powerPoints(evalMode, goldenRotation);
+        if (pts.length == 0) {
+            return new FramingAdvice(true, false, sx, sy, 0.5f, 0.5f, 0f, false, headroomTight);
+        }
+
+        int bestIdx = 0;
+        float bestDist = Float.MAX_VALUE;
+        for (int i = 0; i < pts.length; i++) {
+            float d = dist(sx, sy, pts[i][0], pts[i][1]);
+            if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+            }
+        }
+        if (lockedPointIndex >= 0 && lockedPointIndex < pts.length) {
+            float lockedD = dist(sx, sy, pts[lockedPointIndex][0], pts[lockedPointIndex][1]);
+            if (lockedD <= DEFAULT_EXIT_RADIUS) {
+                return new FramingAdvice(true, true, sx, sy,
+                        pts[lockedPointIndex][0], pts[lockedPointIndex][1],
+                        lockedD, false, headroomTight);
+            }
+        }
+        boolean locked = bestDist <= DEFAULT_ENTER_RADIUS;
+        boolean showArrow = !locked && bestDist > DEFAULT_ENTER_RADIUS * 1.25f;
+        return new FramingAdvice(true, locked, sx, sy,
+                pts[bestIdx][0], pts[bestIdx][1], bestDist, showArrow, headroomTight);
+    }
+
+    /** Builds normalized [0..1] vector line primitives for the chosen framing/pose template. */
+    public static GuideShape[] buildTemplateShapes(GuideTemplate template) {
+        if (template == null || template == GuideTemplate.NONE) {
+            return new GuideShape[0];
+        }
+        switch (template) {
+            case PORTRAIT_THIRDS:
+                return new GuideShape[]{
+                        GuideShape.dashed(0.08f, 0.13f, 0.92f, 0.13f),
+                        GuideShape.dashed(0.14f, 0.34f, 0.86f, 0.34f),
+                        GuideShape.oval(0.535f, 0.225f, 0.705f, 0.455f),
+                        GuideShape.arc(0.41f, 0.48f, 0.83f, 0.96f, 195f, 150f),
+                        GuideShape.line(0.47f, 0.34f, 0.34f, 0.34f),
+                        GuideShape.line(0.37f, 0.31f, 0.34f, 0.34f),
+                        GuideShape.line(0.37f, 0.37f, 0.34f, 0.34f)
+                };
+            case BACK_SILHOUETTE:
+                return new GuideShape[]{
+                        GuideShape.dashed(0.06f, 0.72f, 0.94f, 0.72f),
+                        GuideShape.oval(0.29f, 0.51f, 0.39f, 0.63f),
+                        GuideShape.arc(0.24f, 0.63f, 0.44f, 0.88f, 185f, 170f),
+                        GuideShape.dashed(0.58f, 0.20f, 0.78f, 0.20f)
+                };
+            case LOW_ANGLE:
+                return new GuideShape[]{
+                        GuideShape.dashed(0.06f, 0.78f, 0.94f, 0.78f),
+                        GuideShape.line(0.10f, 0.96f, 0.45f, 0.24f),
+                        GuideShape.line(0.90f, 0.96f, 0.55f, 0.24f),
+                        GuideShape.oval(0.44f, 0.18f, 0.56f, 0.30f)
+                };
+            case SYMMETRY:
+                return new GuideShape[]{
+                        GuideShape.dashed(0.50f, 0.06f, 0.50f, 0.94f),
+                        GuideShape.dashed(0.08f, 0.50f, 0.92f, 0.50f),
+                        GuideShape.line(0.24f, 0.16f, 0.76f, 0.16f),
+                        GuideShape.line(0.76f, 0.16f, 0.76f, 0.84f),
+                        GuideShape.line(0.76f, 0.84f, 0.24f, 0.84f),
+                        GuideShape.line(0.24f, 0.84f, 0.24f, 0.16f)
+                };
+            case OVERHEAD_STILL:
+                return new GuideShape[]{
+                        GuideShape.oval(0.20f, 0.24f, 0.50f, 0.54f),
+                        GuideShape.oval(0.25f, 0.29f, 0.45f, 0.49f),
+                        GuideShape.line(0.55f, 0.48f, 0.82f, 0.48f),
+                        GuideShape.line(0.82f, 0.48f, 0.82f, 0.78f),
+                        GuideShape.line(0.82f, 0.78f, 0.55f, 0.78f),
+                        GuideShape.line(0.55f, 0.78f, 0.55f, 0.48f),
+                        GuideShape.dashed(0.16f, 0.82f, 0.84f, 0.18f)
+                };
+            case GOLDEN_DIAGONAL:
+                return new GuideShape[]{
+                        GuideShape.line(0.06f, 0.94f, 0.94f, 0.06f),
+                        GuideShape.dashed(0.06f, 0.06f, 0.60f, 0.60f),
+                        GuideShape.dashed(0.40f, 0.40f, 0.94f, 0.94f),
+                        GuideShape.oval(0.29f, 0.29f, 0.38f, 0.38f)
+                };
+            default:
+                return new GuideShape[0];
+        }
     }
 
     public static float dist(float x1, float y1, float x2, float y2) {

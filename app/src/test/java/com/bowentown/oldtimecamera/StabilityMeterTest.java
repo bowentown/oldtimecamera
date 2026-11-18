@@ -111,4 +111,23 @@ public class StabilityMeterTest {
         }
         assertTrue(meter.isStable());
     }
+
+    @Test
+    public void shakeDetector_requiresTwoSharpPeaksAndRespectsCooldown() {
+        StabilityMeter.ShakeDetector sd = new StabilityMeter.ShakeDetector();
+        long t = 1_000_000_000L;
+        assertFalse(sd.pushAccelerometer(0f, 9.81f, 0f, t));
+        // Gentle sway never triggers shake
+        for (int i = 1; i <= 8; i++) {
+            assertFalse(sd.pushAccelerometer(1.5f, 9.81f, 0.5f, t + i * 40_000_000L));
+        }
+        // Two brisk peaks within 450ms trigger once
+        assertFalse(sd.pushAccelerometer(22f, 9.81f, 0f, t + 400_000_000L));
+        assertFalse(sd.pushAccelerometer(0f, 9.81f, 0f, t + 460_000_000L));
+        assertTrue(sd.pushAccelerometer(-24f, 9.81f, 0f, t + 520_000_000L));
+        // Immediate repeat inside 1.2s cooldown stays suppressed
+        assertFalse(sd.pushAccelerometer(25f, 9.81f, 0f, t + 700_000_000L));
+        assertFalse(sd.pushAccelerometer(0f, 9.81f, 0f, t + 760_000_000L));
+        assertFalse(sd.pushAccelerometer(-25f, 9.81f, 0f, t + 820_000_000L));
+    }
 }

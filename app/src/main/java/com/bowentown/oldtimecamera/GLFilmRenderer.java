@@ -64,7 +64,27 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "uniform float uLeakSeed;",
             "uniform vec2 uFrameScale;",
             "uniform float uTime;",
-            "uniform vec2 uResolution;"
+            "uniform vec2 uResolution;",
+            "uniform float uMist;",
+            "uniform vec2 uMistStep;"
+    );
+
+    private static final String MIST_BODY = String.join("\n",
+            "vec3 applyMist(vec3 src, vec2 uv) {",
+            "    if (uMist <= 0.001) return src;",
+            "    vec2 s1 = uMistStep;",
+            "    vec2 s2 = uMistStep * 2.25;",
+            "    vec3 bloom = vec3(0.0);",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( s1.x,  s1.y)).rgb - vec3(0.62));",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2(-s1.x,  s1.y)).rgb - vec3(0.62));",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( s1.x, -s1.y)).rgb - vec3(0.62));",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2(-s1.x, -s1.y)).rgb - vec3(0.62));",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( s2.x,  0.0)).rgb - vec3(0.66)) * 0.7;",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2(-s2.x,  0.0)).rgb - vec3(0.66)) * 0.7;",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( 0.0,  s2.y)).rgb - vec3(0.66)) * 0.7;",
+            "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( 0.0, -s2.y)).rgb - vec3(0.66)) * 0.7;",
+            "    return clamp(src + bloom * (0.28 * uMist), 0.0, 1.0);",
+            "}"
     );
 
     private static final String FILM_BODY = String.join("\n",
@@ -119,9 +139,11 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "varying vec2 vScreenUv;",
             "uniform samplerExternalOES uTexture;",
             FILM_UNIFORMS,
+            MIST_BODY,
             FILM_BODY,
             "void main() {",
             "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
+            "    src = applyMist(src, vTexCoord);",
             "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
@@ -155,9 +177,11 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "varying vec2 vScreenUv;",
             "uniform sampler2D uTexture;",
             FILM_UNIFORMS,
+            MIST_BODY,
             FILM_BODY,
             "void main() {",
             "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
+            "    src = applyMist(src, vTexCoord);",
             "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
@@ -185,7 +209,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         int position, texCoord, texMatrix;
         int texture, colorMatrix, colorOffset, saturation, contrast, brightness;
         int fade, grain, vignette, leak, halation, grayscale, leakColor;
-        int leakSeed, frameScale, time, resolution;
+        int leakSeed, frameScale, time, resolution, mist, mistStep;
 
         static Locs of(int program) {
             Locs l = new Locs();
@@ -209,6 +233,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             l.frameScale = uniform(program, "uFrameScale");
             l.time = uniform(program, "uTime");
             l.resolution = uniform(program, "uResolution");
+            l.mist = uniform(program, "uMist");
+            l.mistStep = uniform(program, "uMistStep");
             return l;
         }
 
@@ -292,6 +318,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private volatile FilmPreset preset;
     private volatile boolean grainBoost = false;
     private volatile boolean lightLeakEnabled = true;
+    private volatile boolean blackMistEnabled = false;
     private volatile float leakSeed = 0.28f;
     private volatile float frameScaleX = 1f;
     private volatile float frameScaleY = 1f;
@@ -475,7 +502,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUseProgram(previewProgram);
         FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
         previewTimeSec = (System.nanoTime() % 1_000_000_000L) / 1_000_000_000f;
-        applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, leakSeed,
+        applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled, leakSeed,
                 frameScaleX, frameScaleY, viewportW, viewportH, previewTimeSec);
         GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
         drawQuad(previewLocs, cameraTexBuffer);
@@ -581,6 +608,11 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         view.requestRender();
     }
 
+    void setBlackMistEnabled(boolean enabled) {
+        blackMistEnabled = enabled;
+        view.requestRender();
+    }
+
     void setLeakSeed(float seed) {
         leakSeed = seed;
         view.requestRender();
@@ -607,6 +639,11 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
      */
     Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
                        boolean leakEnabled, float seed) {
+        return renderPhoto(source, p, boostGrain, leakEnabled, false, seed);
+    }
+
+    Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
+                       boolean leakEnabled, boolean mistEnabled, float seed) {
         if (!hostResumed) {
             throw new IllegalStateException("GL preview paused");
         }
@@ -665,7 +702,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             GLES20.glUseProgram(photoProgram);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
-            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, seed, 1f, 1f, w, h,
+            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, mistEnabled, seed, 1f, 1f, w, h,
                     previewTimeSec);
             GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
             drawQuad(photoLocs, photoTexBuffer);
@@ -707,7 +744,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     // ---------------------------------------------------------------- internals
 
     private static void applyUniformsFor(Locs l, FilmPreset p, boolean boostGrain,
-                                         boolean leakEnabled, float seed,
+                                         boolean leakEnabled, boolean mistEnabled, float seed,
                                          float frameScaleX, float frameScaleY,
                                          int w, int h, float timeSec) {
         GLES20.glUniform1i(l.texture, 0);
@@ -727,6 +764,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUniform2f(l.frameScale, frameScaleX, frameScaleY);
         GLES20.glUniform1f(l.time, timeSec);
         GLES20.glUniform2f(l.resolution, w, h);
+        GLES20.glUniform1f(l.mist, mistEnabled ? 1f : 0f);
+        float[] mistStep = FilmRenderMath.mistTexelStep(w, h);
+        GLES20.glUniform2f(l.mistStep, mistStep[0], mistStep[1]);
     }
 
     private void buildTexMatrix() {

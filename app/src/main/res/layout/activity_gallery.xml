@@ -137,8 +137,27 @@
             android:paddingStart="16dp"
             android:paddingTop="68dp"
             android:paddingEnd="16dp"
-            android:paddingBottom="88dp"
+            android:paddingBottom="116dp"
             android:scaleType="fitCenter" />
+
+        <TextView
+            android:id="@+id/lightboxMeta"
+            style="@style/TextMonoCaption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="72dp"
+            android:background="@drawable/bg_assist_pill"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxWidth="320dp"
+            android:paddingStart="12dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="5dp"
+            android:singleLine="true"
+            android:textColor="@color/paper_soft"
+            android:visibility="gone" />
 
         <LinearLayout
             android:layout_width="match_parent"

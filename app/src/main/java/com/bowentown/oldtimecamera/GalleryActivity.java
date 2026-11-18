@@ -68,7 +68,7 @@ public final class GalleryActivity extends ComponentActivity {
     private LinearLayout sheetSelectBar;
     private View lightboxOverlay;
     private ImageView lightboxImage;
-    private TextView lightboxTitle;
+    private TextView lightboxTitle, lightboxMeta;
 
     private CameraPrefs prefs;
     private FrameAdapter adapter;
@@ -117,6 +117,7 @@ public final class GalleryActivity extends ComponentActivity {
         lightboxOverlay = findViewById(R.id.lightboxOverlay);
         lightboxImage = findViewById(R.id.lightboxImage);
         lightboxTitle = findViewById(R.id.lightboxTitle);
+        lightboxMeta = findViewById(R.id.lightboxMeta);
 
         adapter = new FrameAdapter();
         gridView.setAdapter(adapter);
@@ -237,10 +238,20 @@ public final class GalleryActivity extends ComponentActivity {
                 : item.displayName;
         lightboxTitle.setText(String.format(Locale.US, "%d / %d  ·  %s",
                 index + 1, items.size(), dateLabel));
+        lightboxMeta.setVisibility(View.GONE);
         lightboxOverlay.setVisibility(View.VISIBLE);
 
         worker.execute(() -> {
             Bitmap bmp = PhotoSaver.decodeScaledUri(this, item.uri, 2048);
+            String exifSummary = PhotoSaver.readDisplayExifSummary(this, item.uri);
+            PracticeRoll.ShotDiagnostic diag = prefs.getShotDiagnostic(item.uri.toString());
+            StringBuilder meta = new StringBuilder();
+            if (!exifSummary.isEmpty()) meta.append(exifSummary);
+            if (diag != null) {
+                if (meta.length() > 0) meta.append("  ·  ");
+                meta.append(diag.headline);
+            }
+            final String metaText = meta.toString();
             main.post(() -> {
                 if (lightboxIndex != index) {
                     if (bmp != null) bmp.recycle();
@@ -249,6 +260,10 @@ public final class GalleryActivity extends ComponentActivity {
                 Bitmap old = lightboxBitmap;
                 lightboxBitmap = bmp;
                 lightboxImage.setImageBitmap(bmp);
+                if (!metaText.isEmpty()) {
+                    lightboxMeta.setText(metaText);
+                    lightboxMeta.setVisibility(View.VISIBLE);
+                }
                 if (old != null && !old.isRecycled()) old.recycle();
             });
         });

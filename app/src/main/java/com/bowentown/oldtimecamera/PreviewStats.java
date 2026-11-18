@@ -7,6 +7,8 @@ package com.bowentown.oldtimecamera;
  */
 public final class PreviewStats {
 
+    public static final int LUMA_BIN_COUNT = 12;
+
     public final int width;
     public final int height;
     public final float meanLuma;
@@ -21,6 +23,7 @@ public final class PreviewStats {
     public final float saliencyX;
     public final float saliencyY;
     public final float saliencyConfidence;
+    public final float[] lumaBins;
 
     public PreviewStats(
             int width,
@@ -37,6 +40,26 @@ public final class PreviewStats {
             float saliencyX,
             float saliencyY,
             float saliencyConfidence) {
+        this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
+                avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence, null);
+    }
+
+    public PreviewStats(
+            int width,
+            int height,
+            float meanLuma,
+            float clippedHighlights,
+            float crushedShadows,
+            float centerLuma,
+            float borderLuma,
+            float avgR,
+            float avgG,
+            float avgB,
+            float meanSaturation,
+            float saliencyX,
+            float saliencyY,
+            float saliencyConfidence,
+            float[] lumaBins) {
         this.width = width;
         this.height = height;
         this.meanLuma = clamp01(meanLuma);
@@ -51,6 +74,14 @@ public final class PreviewStats {
         this.saliencyX = clamp01(saliencyX);
         this.saliencyY = clamp01(saliencyY);
         this.saliencyConfidence = clamp01(saliencyConfidence);
+        float[] bins = new float[LUMA_BIN_COUNT];
+        if (lumaBins != null) {
+            int copy = Math.min(LUMA_BIN_COUNT, lumaBins.length);
+            for (int i = 0; i < copy; i++) {
+                bins[i] = clamp01(lumaBins[i]);
+            }
+        }
+        this.lumaBins = bins;
     }
 
     /**
@@ -66,6 +97,7 @@ public final class PreviewStats {
 
         int n = width * height;
         float[] luma = new float[n];
+        int[] binCounts = new int[LUMA_BIN_COUNT];
         double sumL = 0.0;
         double sumR = 0.0;
         double sumG = 0.0;
@@ -96,6 +128,8 @@ public final class PreviewStats {
                 float yVal = 0.2126f * r + 0.7152f * g + 0.0722f * b;
 
                 luma[dstRowOff + x] = yVal;
+                int bin = Math.min(LUMA_BIN_COUNT - 1, Math.max(0, (int) (yVal * LUMA_BIN_COUNT)));
+                binCounts[bin]++;
                 sumL += yVal;
                 sumR += r;
                 sumG += g;
@@ -161,6 +195,10 @@ public final class PreviewStats {
         float meanL = (float) (sumL / n);
         float centerL = centerCount > 0 ? (float) (sumCenterL / centerCount) : meanL;
         float borderL = borderCount > 0 ? (float) (sumBorderL / borderCount) : meanL;
+        float[] bins = new float[LUMA_BIN_COUNT];
+        for (int i = 0; i < LUMA_BIN_COUNT; i++) {
+            bins[i] = (float) binCounts[i] / n;
+        }
 
         return new PreviewStats(
                 width,
@@ -178,7 +216,8 @@ public final class PreviewStats {
                 satCount > 0 ? (float) (sumSat / satCount) : 0f,
                 salX,
                 salY,
-                salConf
+                salConf,
+                bins
         );
     }
 

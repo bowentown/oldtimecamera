@@ -140,4 +140,65 @@ public final class StabilityMeter {
             }
         }
     }
+
+    /**
+     * Pure-Java intentional shake detector (two high-g linear impulses within 450 ms,
+     * separated by a 1.2 s cooldown) used for shake-to-shuffle light leaks without
+     * misfiring on everyday walking or tap vibration.
+     */
+    public static final class ShakeDetector {
+        private static final float PEAK_THRESHOLD = 13.5f; // m/s^2 over gravity
+        private static final long PEAK_WINDOW_NS = 450_000_000L;
+        private static final long COOLDOWN_NS = 1_200_000_000L;
+
+        private boolean hasBaseline = false;
+        private float gx, gy, gz;
+        private int peakCount = 0;
+        private long firstPeakNs = 0L;
+        private long lastTriggerNs = Long.MIN_VALUE / 4;
+        private boolean inPeak = false;
+
+        public void reset() {
+            hasBaseline = false;
+            peakCount = 0;
+            firstPeakNs = 0L;
+            inPeak = false;
+        }
+
+        /** Feeds accelerometer reading; returns {@code true} once when a deliberate shake completes. */
+        public boolean pushAccelerometer(float ax, float ay, float az, long timestampNs) {
+            if (!hasBaseline) {
+                gx = ax;
+                gy = ay;
+                gz = az;
+                hasBaseline = true;
+                return false;
+            }
+            gx = 0.8f * gx + 0.2f * ax;
+            gy = 0.8f * gy + 0.2f * ay;
+            gz = 0.8f * gz + 0.2f * az;
+            float mag = (float) Math.hypot(ax - gx, Math.hypot(ay - gy, az - gz));
+            if (timestampNs - lastTriggerNs < COOLDOWN_NS) {
+                return false;
+            }
+            if (peakCount > 0 && timestampNs - firstPeakNs > PEAK_WINDOW_NS) {
+                peakCount = 0;
+            }
+            if (!inPeak && mag >= PEAK_THRESHOLD) {
+                inPeak = true;
+                if (peakCount == 0) {
+                    firstPeakNs = timestampNs;
+                }
+                peakCount++;
+                if (peakCount >= 2) {
+                    peakCount = 0;
+                    lastTriggerNs = timestampNs;
+                    return true;
+                }
+            } else if (inPeak && mag < PEAK_THRESHOLD * 0.55f) {
+                inPeak = false;
+            }
+            return false;
+        }
+    }
 }

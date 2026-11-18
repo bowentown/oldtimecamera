@@ -194,6 +194,10 @@ public final class FilmCameraView extends GLSurfaceView {
         renderer.setLightLeakEnabled(enabled);
     }
 
+    public void setBlackMistEnabled(boolean enabled) {
+        renderer.setBlackMistEnabled(enabled);
+    }
+
     public void setLeakSeed(float seed) {
         renderer.setLeakSeed(seed);
     }
@@ -265,6 +269,16 @@ public final class FilmCameraView extends GLSurfaceView {
      */
     public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
                               boolean leakEnabled, float leakSeed) throws Exception {
+        return renderPhoto(source, preset, grainBoost, leakEnabled, false, leakSeed);
+    }
+
+    /**
+     * Apply the very same film shader (including optional Black Mist highlight bloom) to a
+     * captured or imported bitmap on the GL thread.
+     */
+    public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
+                              boolean leakEnabled, boolean blackMistEnabled,
+                              float leakSeed) throws Exception {
         if (!isAttachedToWindow()) {
             throw new IllegalStateException("Viewfinder is not attached");
         }
@@ -276,7 +290,7 @@ public final class FilmCameraView extends GLSurfaceView {
         final CountDownLatch latch = new CountDownLatch(1);
         renderer.postTask(() -> {
             try {
-                result[0] = renderer.renderPhoto(source, preset, grainBoost, leakEnabled, leakSeed);
+                result[0] = renderer.renderPhoto(source, preset, grainBoost, leakEnabled, blackMistEnabled, leakSeed);
             } catch (Throwable t) {
                 failure[0] = t;
             } finally {

@@ -165,6 +165,12 @@ public class SceneClassifierTest {
         assertEquals(48f / 64f, stats.clippedHighlights, 0.001f);
         assertTrue("Center luma should be crushed dark", stats.centerLuma < 0.05f);
         assertTrue("Border luma should be near highlight clip", stats.borderLuma > 0.94f);
+        assertEquals(PreviewStats.LUMA_BIN_COUNT, stats.lumaBins.length);
+        float sumBins = 0f;
+        for (float v : stats.lumaBins) sumBins += v;
+        assertEquals(1.0f, sumBins, 0.002f);
+        assertTrue(stats.lumaBins[0] > 0.20f);
+        assertTrue(stats.lumaBins[PreviewStats.LUMA_BIN_COUNT - 1] > 0.70f);
 
         // Pure saturated green frame -> high meanSaturation and dominant avgG
         byte[] greenRgba = new byte[4 * 4 * 4];

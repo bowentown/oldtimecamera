@@ -41,6 +41,7 @@ public final class CameraPrefs {
     public enum PaperStyle {
         IVORY,
         BLACK,
+        SPROCKET_35MM,
         NONE;
 
         public static PaperStyle fromName(String name) {
@@ -48,6 +49,27 @@ public final class CameraPrefs {
                 if (p.name().equals(name)) return p;
             }
             return IVORY;
+        }
+    }
+
+    public enum ShootMode {
+        SINGLE,
+        DOUBLE_EXP,
+        HALF_FRAME,
+        QUAD_STRIP;
+
+        public ShootMode next() {
+            ShootMode[] all = values();
+            return all[(ordinal() + 1) % all.length];
+        }
+
+        public static ShootMode fromName(String name) {
+            if (name != null) {
+                for (ShootMode m : values()) {
+                    if (m.name().equals(name)) return m;
+                }
+            }
+            return SINGLE;
         }
     }
 
@@ -65,6 +87,11 @@ public final class CameraPrefs {
     }
 
     public static final int FRAMES_PER_ROLL = 36;
+    public static final int HALF_FRAMES_PER_ROLL = 72;
+
+    public static int framesForMode(ShootMode mode) {
+        return mode == ShootMode.HALF_FRAME ? HALF_FRAMES_PER_ROLL : FRAMES_PER_ROLL;
+    }
 
     private static final String PREFS_NAME = "old_time_camera_prefs";
     private static final String KEY_PRESET_ID = "preset_id";
@@ -78,6 +105,10 @@ public final class CameraPrefs {
     private static final String KEY_GRID = "grid_enabled";
     private static final String KEY_GRID_MODE = "grid_mode";
     private static final String KEY_GOLDEN_ROT = "golden_rot";
+    private static final String KEY_GUIDE_TEMPLATE = "guide_template";
+    private static final String KEY_SHOOT_MODE = "shoot_mode";
+    private static final String KEY_BLACK_MIST = "black_mist";
+    private static final String KEY_SHAKE_LEAK = "shake_leak";
     private static final String KEY_SOUND = "shutter_sound";
     private static final String KEY_FRONT_MIRROR = "front_mirror";
     private static final String KEY_TIMER_SECONDS = "timer_seconds";
@@ -91,6 +122,16 @@ public final class CameraPrefs {
     private static final String KEY_ASSIST_SCENE = "assist_scene";
     private static final String KEY_ASSIST_STABILITY = "assist_stability";
     private static final String KEY_ASSIST_STEADY_SHUTTER = "assist_steady_shutter";
+    private static final String KEY_ASSIST_METER_BAR = "assist_meter_bar";
+
+    private static final String KEY_RECIPE_INTENSITY = "recipe_intensity";
+    private static final String KEY_RECIPE_GRAIN = "recipe_grain";
+    private static final String KEY_RECIPE_WARMTH = "recipe_warmth";
+    private static final String KEY_ACTIVE_CUSTOM_RECIPE = "active_custom_recipe";
+    private static final String KEY_CUSTOM_RECIPES_RAW = "custom_recipes_raw";
+    private static final String KEY_PRACTICE_THEME = "practice_theme";
+    private static final String KEY_PRACTICE_STEP = "practice_step";
+    private static final String KEY_DIAGNOSTICS_LOG = "diagnostics_log";
 
     private final SharedPreferences sp;
 
@@ -298,5 +339,116 @@ public final class CameraPrefs {
 
     public void setLastPhotoUri(Uri uri) {
         sp.edit().putString(KEY_LAST_PHOTO_URI, uri == null ? null : uri.toString()).apply();
+    }
+
+    public CompositionMath.GuideTemplate getGuideTemplate() {
+        return CompositionMath.GuideTemplate.fromName(sp.getString(KEY_GUIDE_TEMPLATE, null));
+    }
+
+    public void setGuideTemplate(CompositionMath.GuideTemplate template) {
+        CompositionMath.GuideTemplate safe = template != null
+                ? template : CompositionMath.GuideTemplate.NONE;
+        sp.edit().putString(KEY_GUIDE_TEMPLATE, safe.name()).apply();
+    }
+
+    public ShootMode getShootMode() {
+        return ShootMode.fromName(sp.getString(KEY_SHOOT_MODE, ShootMode.SINGLE.name()));
+    }
+
+    public void setShootMode(ShootMode mode) {
+        ShootMode safe = mode != null ? mode : ShootMode.SINGLE;
+        sp.edit().putString(KEY_SHOOT_MODE, safe.name()).apply();
+    }
+
+    public boolean isBlackMistEnabled() {
+        return sp.getBoolean(KEY_BLACK_MIST, false);
+    }
+
+    public void setBlackMistEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_BLACK_MIST, enabled).apply();
+    }
+
+    public boolean isShakeLeakEnabled() {
+        return sp.getBoolean(KEY_SHAKE_LEAK, true);
+    }
+
+    public void setShakeLeakEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_SHAKE_LEAK, enabled).apply();
+    }
+
+    public boolean isAssistMeterBar() {
+        return sp.getBoolean(KEY_ASSIST_METER_BAR, true);
+    }
+
+    public void setAssistMeterBar(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_METER_BAR, enabled).apply();
+    }
+
+    public FilmRecipe getFilmRecipe() {
+        return new FilmRecipe(
+                sp.getFloat(KEY_RECIPE_INTENSITY, 1.0f),
+                sp.getFloat(KEY_RECIPE_GRAIN, 1.0f),
+                sp.getFloat(KEY_RECIPE_WARMTH, 0.0f));
+    }
+
+    public void setFilmRecipe(FilmRecipe recipe) {
+        FilmRecipe safe = recipe != null ? recipe : FilmRecipe.DEFAULT;
+        sp.edit()
+                .putFloat(KEY_RECIPE_INTENSITY, safe.intensity)
+                .putFloat(KEY_RECIPE_GRAIN, safe.grainScale)
+                .putFloat(KEY_RECIPE_WARMTH, safe.warmth)
+                .apply();
+    }
+
+    public String getActiveCustomRecipeId() {
+        return sp.getString(KEY_ACTIVE_CUSTOM_RECIPE, "");
+    }
+
+    public void setActiveCustomRecipeId(String id) {
+        sp.edit().putString(KEY_ACTIVE_CUSTOM_RECIPE, id == null ? "" : id).apply();
+    }
+
+    public java.util.List<FilmRecipe.SavedRecipe> getSavedRecipes() {
+        return FilmRecipe.decodeSavedList(sp.getString(KEY_CUSTOM_RECIPES_RAW, ""));
+    }
+
+    public void setSavedRecipes(java.util.List<FilmRecipe.SavedRecipe> recipes) {
+        sp.edit().putString(KEY_CUSTOM_RECIPES_RAW, FilmRecipe.encodeSavedList(recipes)).apply();
+    }
+
+    public PracticeRoll.Theme getPracticeTheme() {
+        return PracticeRoll.Theme.fromName(sp.getString(KEY_PRACTICE_THEME, null));
+    }
+
+    public int getPracticeStep() {
+        return Math.max(0, Math.min(PracticeRoll.ROLL_FRAMES - 1, sp.getInt(KEY_PRACTICE_STEP, 0)));
+    }
+
+    public void setPracticeState(PracticeRoll.Theme theme, int stepIndex) {
+        int clamped = Math.max(0, Math.min(PracticeRoll.ROLL_FRAMES - 1, stepIndex));
+        sp.edit()
+                .putString(KEY_PRACTICE_THEME, theme == null ? null : theme.name())
+                .putInt(KEY_PRACTICE_STEP, theme == null ? 0 : clamped)
+                .apply();
+    }
+
+    public void recordShotDiagnostic(String fileKey, PracticeRoll.ShotDiagnostic diag) {
+        if (fileKey == null || fileKey.isEmpty() || diag == null) return;
+        java.util.Map<String, PracticeRoll.ShotDiagnostic> old =
+                PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, ""));
+        java.util.Map<String, PracticeRoll.ShotDiagnostic> updated = new java.util.LinkedHashMap<>();
+        updated.put(fileKey, diag);
+        for (java.util.Map.Entry<String, PracticeRoll.ShotDiagnostic> e : old.entrySet()) {
+            if (updated.size() >= 48) break;
+            if (!fileKey.equals(e.getKey())) {
+                updated.put(e.getKey(), e.getValue());
+            }
+        }
+        sp.edit().putString(KEY_DIAGNOSTICS_LOG, PracticeRoll.encodeDiagnosticLog(updated)).apply();
+    }
+
+    public PracticeRoll.ShotDiagnostic getShotDiagnostic(String fileKey) {
+        if (fileKey == null || fileKey.isEmpty()) return null;
+        return PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, "")).get(fileKey);
     }
 }

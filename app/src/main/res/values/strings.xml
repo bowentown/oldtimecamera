@@ -21,7 +21,9 @@
 
     <string name="hud_grid">网格</string>
     <string name="hud_timer_off">定时</string>
-    <string name="hud_double_exp">重曝</string>
+    <string name="hud_double_exp">拍摄模式</string>
+    <string name="hud_pose_guide">构图示范</string>
+    <string name="hud_meter_bar">光表刻度条</string>
     <string name="roll_placeholder">R01 · 00/36</string>
     <string name="zoom_default">1.0x</string>
     <string name="aspect_default">3:4</string>
@@ -30,16 +32,49 @@
     <string name="ev_zero">0.0</string>
     <string name="close">关闭</string>
 
+    <string name="mode_single">1× 单张</string>
+    <string name="mode_double">2× 重曝</string>
+    <string name="mode_half">½ 半格</string>
+    <string name="mode_quad">4格连拍</string>
+    <string name="hint_mode_single">单张模式</string>
+    <string name="hint_mode_double">2× 双重曝光</string>
+    <string name="hint_mode_half">½ 半格双拼 (72格)</string>
+    <string name="hint_mode_quad">4 格连续抓拍</string>
+    <string name="hint_half_first">½ 第 1 格已定格 · 再拍第 2 格合成</string>
+    <string name="hint_quad_progress">连拍 %1$d / 4…</string>
+    <string name="hint_leak_shuffled">漏光已随机换位</string>
+
+    <string name="pose_none">示范关</string>
+    <string name="pose_portrait">人像三分</string>
+    <string name="pose_back">背影留白</string>
+    <string name="pose_low">低角仰拍</string>
+    <string name="pose_symmetry">建筑对称</string>
+    <string name="pose_overhead">桌面静物</string>
+    <string name="pose_diagonal">黄金对角</string>
+
+    <string name="recipe_title">%1$s · 配方</string>
+    <string name="recipe_intensity">浓度</string>
+    <string name="recipe_grain">颗粒</string>
+    <string name="recipe_warmth">冷暖</string>
+    <string name="recipe_reset">重置</string>
+    <string name="recipe_save">存为自定</string>
+    <string name="recipe_saved">已存专属配方：%1$s</string>
+    <string name="recipe_delete_title">删除自定义配方？</string>
+    <string name="recipe_delete_ok">删除</string>
+    <string name="recipe_deleted">已删除配方</string>
+
     <string name="sheet_title">暗房</string>
     <string name="sheet_aspect">画幅</string>
     <string name="sheet_paper">相纸</string>
     <string name="sheet_date">日期</string>
     <string name="sheet_options">质感</string>
     <string name="sheet_assist">辅助</string>
+    <string name="sheet_practice">摄影练习卷（6 格微挑战）</string>
     <string name="sheet_calibration">校准</string>
 
     <string name="paper_ivory">暖白</string>
     <string name="paper_black">黑胶</string>
+    <string name="paper_sprocket">齿孔</string>
     <string name="paper_none">无边</string>
 
     <string name="date_today">今日</string>
@@ -48,16 +83,26 @@
 
     <string name="grain_boost">颗粒</string>
     <string name="light_leak">漏光</string>
+    <string name="black_mist">黑柔光</string>
+    <string name="shake_leak">摇一摇换漏光</string>
     <string name="level_overlay">水平仪</string>
     <string name="shutter_sound">快门声</string>
     <string name="front_mirror">镜像</string>
 
     <string name="assist_master">新手辅助</string>
-    <string name="assist_comp">构图辅助</string>
+    <string name="assist_comp">构图与方位指引</string>
     <string name="assist_exposure">曝光提示</string>
+    <string name="assist_meter_bar">底栏测光表</string>
     <string name="assist_scene">胶片推荐</string>
     <string name="assist_stability">手抖提示</string>
     <string name="assist_steady_shutter">稳拍快门</string>
+
+    <string name="practice_start">领卷</string>
+    <string name="practice_active">进行 %1$d/6</string>
+    <string name="practice_exit">退出练习卷</string>
+    <string name="practice_done">本卷已毕业！继续自由拍或挑战下一卷</string>
+    <string name="practice_started">已载入：%1$s</string>
+    <string name="hint_headroom_tight">头顶偏紧 · 略上抬</string>
 
     <string name="hint_overexposed">太亮 · 下拉 EV</string>
     <string name="hint_underexposed">偏暗 · 上推 EV</string>

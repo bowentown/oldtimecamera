@@ -232,6 +232,11 @@ public final class PhotoSaver {
         if (!hasFrame) return new int[]{0, 0, photoW, photoH};
 
         int shortSide = Math.min(photoW, photoH);
+        if (paperStyle == CameraPrefs.PaperStyle.SPROCKET_35MM) {
+            int pad = Math.round(shortSide * 0.068f);
+            int footer = Math.round(shortSide * 0.062f);
+            return new int[]{pad, footer, photoW + pad * 2, photoH + pad * 2 + footer};
+        }
         float padRatio;
         float footerRatio;
         if (aspect == CameraPrefs.AspectRatio.RATIO_1_1) {
@@ -257,7 +262,7 @@ public final class PhotoSaver {
                                     CameraPrefs.AspectRatio aspect,
                                     int frameNumber,
                                     String customNote) {
-        return applyPaper(null, photo, preset, paperStyle, dateMode, aspect, frameNumber, customNote);
+        return applyPaper(null, photo, preset, paperStyle, dateMode, aspect, frameNumber, customNote, null);
     }
 
     /** Adds the selected print border, frame badge, optional note, and LED date stamp. */
@@ -267,7 +272,18 @@ public final class PhotoSaver {
                                     CameraPrefs.AspectRatio aspect,
                                     int frameNumber,
                                     String customNote) {
-        boolean hasFrame = paperStyle != CameraPrefs.PaperStyle.NONE;
+        return applyPaper(context, photo, preset, paperStyle, dateMode, aspect, frameNumber, customNote, null);
+    }
+
+    /** Adds print border (including 35mm sprocket carrier + EXIF telemetry), frame badge, note, and LED date. */
+    public static Bitmap applyPaper(Context context, Bitmap photo, FilmPreset preset,
+                                    CameraPrefs.PaperStyle paperStyle,
+                                    CameraPrefs.DateMode dateMode,
+                                    CameraPrefs.AspectRatio aspect,
+                                    int frameNumber,
+                                    String customNote,
+                                    String exifTelemetry) {
+        boolean hasFrame = paperStyle != null && paperStyle != CameraPrefs.PaperStyle.NONE;
         String stampText = dateString(dateMode);
         boolean hasStamp = !stampText.isEmpty();
         if (!hasFrame && !hasStamp) return photo;
@@ -286,8 +302,9 @@ public final class PhotoSaver {
         Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
 
-        boolean darkPaper = paperStyle == CameraPrefs.PaperStyle.BLACK;
-        int bgColor = darkPaper ? 0xFF171513 : preset.paperColor;
+        boolean sprocket = paperStyle == CameraPrefs.PaperStyle.SPROCKET_35MM;
+        boolean darkPaper = sprocket || paperStyle == CameraPrefs.PaperStyle.BLACK;
+        int bgColor = sprocket ? 0xFF13110F : (darkPaper ? 0xFF171513 : preset.paperColor);
         canvas.drawColor(bgColor);
         canvas.drawBitmap(photo, pad, pad, null);
 
@@ -303,6 +320,10 @@ public final class PhotoSaver {
 
         paint.setTypeface(FilmUiHelper.monoFont(context));
 
+        if (sprocket) {
+            draw35mmSprockets(canvas, paint, outW, outH, pad, shortSide, preset, frameNumber);
+        }
+
         if (hasStamp) {
             paint.setTextAlign(Paint.Align.RIGHT);
             paint.setColor(0xFFF2A65A);
@@ -313,27 +334,207 @@ public final class PhotoSaver {
         }
 
         if (hasFrame) {
-            int inkColor = darkPaper ? 0xFFB0A695 : 0xFF7D705C;
-            float baseY = outH - footer * (aspect == CameraPrefs.AspectRatio.RATIO_1_1 ? 0.42f : 0.37f);
+            int inkColor = sprocket ? 0xFFD99A4E : (darkPaper ? 0xFFB0A695 : 0xFF7D705C);
+            float baseY = sprocket
+                    ? (pad + h + (outH - (pad + h)) * 0.36f)
+                    : (outH - footer * (aspect == CameraPrefs.AspectRatio.RATIO_1_1 ? 0.42f : 0.37f));
 
             paint.setTextAlign(Paint.Align.LEFT);
             paint.setColor(inkColor);
-            paint.setTextSize(shortSide * 0.024f);
+            paint.setTextSize(shortSide * (sprocket ? 0.021f : 0.024f));
             String leftLabel = frameNumber > 0
                     ? String.format(Locale.US, "%s  ·  NO.%02d", preset.name, frameNumber)
                     : preset.name;
             canvas.drawText(leftLabel, pad + w * 0.01f, baseY, paint);
 
             String note = customNote == null ? "" : customNote.trim();
-            if (!note.isEmpty()) {
+            String rightText = !note.isEmpty() ? note : (sprocket && exifTelemetry != null ? exifTelemetry : "");
+            if (!rightText.isEmpty()) {
                 paint.setTextAlign(Paint.Align.RIGHT);
                 paint.setColor(darkPaper ? 0xFFEFE7D6 : 0xFF473F35);
-                paint.setTextSize(shortSide * 0.025f);
-                if (note.length() > 36) note = note.substring(0, 35) + "…";
-                canvas.drawText(note, pad + w * 0.99f, baseY, paint);
+                paint.setTextSize(shortSide * (sprocket ? 0.021f : 0.025f));
+                if (rightText.length() > 36) rightText = rightText.substring(0, 35) + "…";
+                canvas.drawText(rightText, pad + w * 0.99f, baseY, paint);
             }
         }
         return out;
+    }
+
+    private static void draw35mmSprockets(Canvas canvas, Paint paint, int outW, int outH,
+                                          int pad, int shortSide, FilmPreset preset, int frameNumber) {
+        float holeH = Math.max(8f, shortSide * 0.025f);
+        float holeW = holeH * 1.45f;
+        float step = holeW * 1.85f;
+        float corner = holeH * 0.24f;
+        float topY = Math.max(4f, pad * 0.26f);
+        float botY = outH - topY - holeH;
+
+        paint.setColor(0xFFDCD3C2);
+        RectF r = new RectF();
+        for (float x = pad; x + holeW <= outW - pad; x += step) {
+            r.set(x, topY, x + holeW, topY + holeH);
+            canvas.drawRoundRect(r, corner, corner, paint);
+            r.set(x, botY, x + holeW, botY + holeH);
+            canvas.drawRoundRect(r, corner, corner, paint);
+        }
+
+        // Authentic subtle amber 35mm edge rebate code below top sprockets.
+        float codeY = pad * 0.85f;
+        if (codeY > topY + holeH + 4f) {
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setColor(0xAAF2A65A);
+            paint.setTextSize(Math.max(9f, shortSide * 0.016f));
+            String code = String.format(Locale.US, "OTC DX  ·  %s  ·  %02dA",
+                    preset != null ? preset.isoTag : "400", Math.max(1, frameNumber));
+            canvas.drawText(code, pad, codeY, paint);
+        }
+    }
+
+    /** Half-frame pairs portrait captures side-by-side and landscape captures top-over-bottom. */
+    public static boolean shouldPairHalfFrameSideBySide(boolean landscapeCapture) {
+        return !landscapeCapture;
+    }
+
+    /**
+     * Composes two developed half-frame exposures into one cohesive analog diptych with a matte
+     * carbon divider and frame edge indices before applying paper border.
+     */
+    public static Bitmap composeHalfFrameDiptych(Context context, Bitmap first, Bitmap second,
+                                                 boolean sideBySide, int frameIndex) {
+        if (first == null) return second;
+        if (second == null) return first;
+        int w1 = first.getWidth();
+        int h1 = first.getHeight();
+        Bitmap alignedSecond = second;
+        if (second.getWidth() != w1 || second.getHeight() != h1) {
+            int[] crop = computeCropBounds(second.getWidth(), second.getHeight(), (float) w1 / h1);
+            Bitmap tmp = (crop[0] == 0 && crop[1] == 0 && crop[2] == second.getWidth() && crop[3] == second.getHeight())
+                    ? second
+                    : Bitmap.createBitmap(second, crop[0], crop[1], crop[2], crop[3]);
+            alignedSecond = (tmp.getWidth() == w1 && tmp.getHeight() == h1)
+                    ? tmp
+                    : Bitmap.createScaledBitmap(tmp, w1, h1, true);
+            if (tmp != second && tmp != alignedSecond) tmp.recycle();
+        }
+
+        // Cap individual cell to keep total composite well inside 2560px texture limits.
+        int cellLimit = sideBySide ? 1160 : 1160;
+        Bitmap cell1 = capEdgeNoRecycle(first, cellLimit);
+        Bitmap cell2 = capEdgeNoRecycle(alignedSecond, cellLimit);
+        if (alignedSecond != second && !alignedSecond.isRecycled()) {
+            alignedSecond.recycle();
+        }
+
+        int cw = cell1.getWidth();
+        int ch = cell1.getHeight();
+        int shortEdge = Math.min(cw, ch);
+        int gap = Math.max(8, Math.round(shortEdge * 0.026f));
+        int outer = Math.max(12, Math.round(shortEdge * 0.030f));
+
+        int outW = sideBySide ? (outer * 2 + cw * 2 + gap) : (outer * 2 + cw);
+        int outH = sideBySide ? (outer * 2 + ch) : (outer * 2 + ch * 2 + gap);
+
+        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        canvas.drawColor(0xFF13110F);
+
+        canvas.drawBitmap(cell1, outer, outer, null);
+        int secondX = sideBySide ? (outer + cw + gap) : outer;
+        int secondY = sideBySide ? outer : (outer + ch + gap);
+        canvas.drawBitmap(cell2, secondX, secondY, null);
+
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setTypeface(FilmUiHelper.monoFont(context));
+        p.setColor(0xCCF2A65A);
+        p.setTextSize(Math.max(12f, shortEdge * 0.024f));
+        p.setTextAlign(Paint.Align.LEFT);
+        int baseNum = Math.max(1, (frameIndex + 1) / 2);
+        canvas.drawText(String.format(Locale.US, "%02dA", baseNum), outer + 6f, outer + ch - 8f, p);
+        canvas.drawText(String.format(Locale.US, "%02dB", baseNum), secondX + 6f, secondY + ch - 8f, p);
+
+        if (cell1 != first) cell1.recycle();
+        if (cell2 != second) cell2.recycle();
+        return out;
+    }
+
+    /**
+     * Computes grid {@code [cols, rows]} for a 4-frame action strip: vertical 1x4 film strip
+     * for horizontal frames, and balanced 2x2 contact quad for tall portrait frames.
+     */
+    public static int[] computeQuadGridDimensions(int frameW, int frameH) {
+        if (frameW <= 0 || frameH <= 0) return new int[]{2, 2};
+        float ratio = (float) frameW / (float) frameH;
+        return ratio >= 1.15f ? new int[]{1, 4} : new int[]{2, 2};
+    }
+
+    /** Composes 2..4 burst frames into a sleek darkroom multi-frame strip or 2x2 quad plate. */
+    public static Bitmap composeQuadActionStrip(Context context, List<Bitmap> frames, int baseFrameNumber) {
+        if (frames == null || frames.isEmpty()) return null;
+        Bitmap first = frames.get(0);
+        int[] grid = computeQuadGridDimensions(first.getWidth(), first.getHeight());
+        int cols = grid[0];
+        int rows = grid[1];
+        int maxCells = Math.min(4, frames.size());
+        int cellMax = (cols == 1) ? 960 : 1080;
+
+        Bitmap[] cells = new Bitmap[maxCells];
+        int cw = 0;
+        int ch = 0;
+        for (int i = 0; i < maxCells; i++) {
+            Bitmap src = frames.get(i);
+            Bitmap scaled = capEdgeNoRecycle(src, cellMax);
+            if (i == 0) {
+                cw = scaled.getWidth();
+                ch = scaled.getHeight();
+            } else if (scaled.getWidth() != cw || scaled.getHeight() != ch) {
+                Bitmap fit = Bitmap.createScaledBitmap(scaled, cw, ch, true);
+                if (scaled != src) scaled.recycle();
+                scaled = fit;
+            }
+            cells[i] = scaled;
+        }
+
+        int shortSide = Math.min(cw, ch);
+        int gap = Math.max(8, Math.round(shortSide * 0.026f));
+        int outer = Math.max(14, Math.round(shortSide * 0.036f));
+        int labelH = Math.max(18, Math.round(shortSide * 0.038f));
+
+        int outW = outer * 2 + cols * cw + Math.max(0, cols - 1) * gap;
+        int outH = outer * 2 + rows * (ch + labelH) + Math.max(0, rows - 1) * gap;
+
+        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        canvas.drawColor(0xFF13110F);
+
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setTypeface(FilmUiHelper.monoFont(context));
+        text.setColor(0xFFF2A65A);
+        text.setTextSize(Math.max(12f, shortSide * 0.025f));
+        text.setTextAlign(Paint.Align.LEFT);
+
+        for (int i = 0; i < maxCells; i++) {
+            int col = i % cols;
+            int row = i / cols;
+            int x = outer + col * (cw + gap);
+            int y = outer + row * (ch + labelH + gap);
+            canvas.drawBitmap(cells[i], x, y, null);
+            canvas.drawText(String.format(Locale.US, "%02d·%d", Math.max(1, baseFrameNumber), i + 1),
+                    x + 4f, y + ch + labelH * 0.72f, text);
+            if (cells[i] != frames.get(i) && !cells[i].isRecycled()) {
+                cells[i].recycle();
+            }
+        }
+        return out;
+    }
+
+    private static Bitmap capEdgeNoRecycle(Bitmap src, int maxEdge) {
+        if (src == null || maxEdge <= 0) return src;
+        int longest = Math.max(src.getWidth(), src.getHeight());
+        if (longest <= maxEdge) return src;
+        float scale = (float) maxEdge / (float) longest;
+        return Bitmap.createScaledBitmap(src,
+                Math.max(1, Math.round(src.getWidth() * scale)),
+                Math.max(1, Math.round(src.getHeight() * scale)), true);
     }
 
     /**
@@ -556,15 +757,98 @@ public final class PhotoSaver {
     public static String buildRecipeComment(FilmPreset preset, boolean grainBoost,
                                             boolean leakEnabled, int rollNumber,
                                             int frameNumber, int rotationDegrees) {
+        return buildRecipeComment(preset, grainBoost, leakEnabled, rollNumber,
+                frameNumber, rotationDegrees, null, false, CameraPrefs.ShootMode.SINGLE);
+    }
+
+    /** Extended analog recipe EXIF UserComment carrying custom recipe, mist, and shooting mode. */
+    public static String buildRecipeComment(FilmPreset preset, boolean grainBoost,
+                                            boolean leakEnabled, int rollNumber,
+                                            int frameNumber, int rotationDegrees,
+                                            FilmRecipe recipe, boolean blackMist,
+                                            CameraPrefs.ShootMode shootMode) {
         if (preset == null) return null;
-        return String.format(Locale.US,
+        StringBuilder sb = new StringBuilder(String.format(Locale.US,
                 "OTC|stock=%s|grain=%s|leak=%s|roll=%02d|frame=%02d|rot=%03d",
                 preset.id,
                 grainBoost ? "boost" : "normal",
                 leakEnabled ? "on" : "off",
                 Math.max(1, rollNumber),
                 Math.max(1, frameNumber),
-                ((rotationDegrees % 360) + 360) % 360);
+                ((rotationDegrees % 360) + 360) % 360));
+        if (recipe != null && !recipe.isDefault()) {
+            sb.append('|').append(recipe.toExifTag());
+        }
+        if (blackMist) {
+            sb.append("|mist=on");
+        }
+        if (shootMode != null && shootMode != CameraPrefs.ShootMode.SINGLE) {
+            sb.append("|mode=").append(shootMode.name().toLowerCase(Locale.US));
+        }
+        return sb.toString();
+    }
+
+    /** Pure-Java formatter turning raw EXIF strings into a compact analog meter line. */
+    public static String formatShortExifStrings(String exposureSecRaw, String fNumberRaw, String isoRaw) {
+        StringBuilder sb = new StringBuilder();
+        if (exposureSecRaw != null && !exposureSecRaw.trim().isEmpty()) {
+            try {
+                double sec = Double.parseDouble(exposureSecRaw.trim());
+                if (sec > 0.0 && sec < 0.75) {
+                    long denom = Math.max(1L, Math.round(1.0 / sec));
+                    sb.append("1/").append(denom).append('s');
+                } else if (sec >= 0.75) {
+                    sb.append(String.format(Locale.US, "%.1fs", sec));
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (fNumberRaw != null && !fNumberRaw.trim().isEmpty()) {
+            try {
+                double fn = Double.parseDouble(fNumberRaw.trim());
+                if (fn > 0.0) {
+                    if (sb.length() > 0) sb.append(" · ");
+                    sb.append(String.format(Locale.US, "f/%.1f", fn));
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (isoRaw != null && !isoRaw.trim().isEmpty()) {
+            String cleanIso = isoRaw.trim().split(",")[0].trim();
+            if (!cleanIso.isEmpty()) {
+                if (sb.length() > 0) sb.append(" · ");
+                sb.append("ISO ").append(cleanIso);
+            }
+        }
+        return sb.toString();
+    }
+
+    public static String extractShortExifTelemetry(byte[] sourceExifJpeg) {
+        if (sourceExifJpeg == null || sourceExifJpeg.length == 0) return "";
+        try {
+            android.media.ExifInterface src = new android.media.ExifInterface(
+                    new java.io.ByteArrayInputStream(sourceExifJpeg));
+            return formatShortExifStrings(
+                    src.getAttribute(android.media.ExifInterface.TAG_EXPOSURE_TIME),
+                    src.getAttribute(android.media.ExifInterface.TAG_F_NUMBER),
+                    src.getAttribute(android.media.ExifInterface.TAG_ISO_SPEED_RATINGS));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    public static String readDisplayExifSummary(Context context, Uri uri) {
+        if (context == null || uri == null) return "";
+        try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+            if (is == null) return "";
+            android.media.ExifInterface exif = new android.media.ExifInterface(is);
+            return formatShortExifStrings(
+                    exif.getAttribute(android.media.ExifInterface.TAG_EXPOSURE_TIME),
+                    exif.getAttribute(android.media.ExifInterface.TAG_F_NUMBER),
+                    exif.getAttribute(android.media.ExifInterface.TAG_ISO_SPEED_RATINGS));
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private static void applyAnalogExif(File outFile, byte[] sourceExifJpeg, String recipeComment) {

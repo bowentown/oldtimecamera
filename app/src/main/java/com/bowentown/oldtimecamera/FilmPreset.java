@@ -59,6 +59,51 @@ public final class FilmPreset {
         this.suggestFrame = b.suggestFrame;
     }
 
+    private FilmPreset(
+            String id, String name, String isoTag, String note, String shortNote, int swatch,
+            float[] colMajorMatrix, float[] offset, float saturation, float contrast,
+            float brightness, float fade, float grain, float vignette, float leak,
+            float halation, float[] leakColor, boolean grayscale, int paperColor,
+            boolean suggestStamp, boolean suggestFrame) {
+        this.id = id;
+        this.name = name;
+        this.isoTag = isoTag;
+        this.note = note;
+        this.shortNote = shortNote;
+        this.swatch = swatch;
+        this.colorMatrix = colMajorMatrix;
+        this.colorOffset = offset;
+        this.saturation = saturation;
+        this.contrast = contrast;
+        this.brightness = brightness;
+        this.fade = fade;
+        this.grain = grain;
+        this.vignette = vignette;
+        this.leak = leak;
+        this.halation = halation;
+        this.leakColor = leakColor;
+        this.grayscale = grayscale;
+        this.paperColor = paperColor;
+        this.suggestStamp = suggestStamp;
+        this.suggestFrame = suggestFrame;
+    }
+
+    /** Creates a derived preset preserving pre-transposed column-major color matrix order. */
+    public static FilmPreset deriveColMajor(
+            FilmPreset base, String customName,
+            float[] colMajorMatrix, float[] offset,
+            float saturation, float contrast, float brightness,
+            float fade, float grain, float vignette, float leak, float halation) {
+        return new FilmPreset(
+                base.id,
+                (customName != null && !customName.isEmpty()) ? customName : base.name,
+                base.isoTag, base.note, base.shortNote, base.swatch,
+                colMajorMatrix, offset, saturation, contrast, brightness,
+                fade, grain, vignette, leak, halation,
+                base.leakColor, base.grayscale, base.paperColor,
+                base.suggestStamp, base.suggestFrame);
+    }
+
     /** Accepts a row-major 3x3 matrix and returns column-major for GLES. */
     private static float[] toColumnMajor(float[] m) {
         return new float[]{

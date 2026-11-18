@@ -27,10 +27,13 @@ public final class DarkroomSheet {
         void onDateModeChanged(CameraPrefs.DateMode mode);
         void onGrainBoostChanged(boolean enabled);
         void onLightLeakChanged(boolean enabled);
+        void onBlackMistChanged(boolean enabled);
+        void onShakeLeakChanged(boolean enabled);
         void onLevelChanged(boolean enabled);
         void onShutterSoundChanged(boolean enabled);
         void onFrontMirrorChanged(boolean enabled);
         void onAssistSettingsChanged();
+        void onPracticeRollSelected(PracticeRoll.Theme theme);
         int onCycleRotation();
         String getRotationLabel();
         void onLoadNewRoll();
@@ -84,6 +87,7 @@ public final class DarkroomSheet {
         String[] paperLabels = {
                 context.getString(R.string.paper_ivory),
                 context.getString(R.string.paper_black),
+                context.getString(R.string.paper_sprocket),
                 context.getString(R.string.paper_none)
         };
         CameraPrefs.PaperStyle[] papers = CameraPrefs.PaperStyle.values();
@@ -117,6 +121,14 @@ public final class DarkroomSheet {
             prefs.setLightLeakEnabled(enabled);
             callbacks.onLightLeakChanged(enabled);
         }, true);
+        addToggle(context, toggleContainer, R.string.black_mist, prefs.isBlackMistEnabled(), enabled -> {
+            prefs.setBlackMistEnabled(enabled);
+            callbacks.onBlackMistChanged(enabled);
+        }, true);
+        addToggle(context, toggleContainer, R.string.shake_leak, prefs.isShakeLeakEnabled(), enabled -> {
+            prefs.setShakeLeakEnabled(enabled);
+            callbacks.onShakeLeakChanged(enabled);
+        }, true);
         addToggle(context, toggleContainer, R.string.level_overlay, prefs.isLevelEnabled(), enabled -> {
             prefs.setLevelEnabled(enabled);
             callbacks.onLevelChanged(enabled);
@@ -132,7 +144,7 @@ public final class DarkroomSheet {
 
         // Beginner Assist section ("辅助")
         LinearLayout assistContainer = dialog.findViewById(R.id.assistToggleContainer);
-        final ToggleRow[] subRows = new ToggleRow[5];
+        final ToggleRow[] subRows = new ToggleRow[6];
         boolean masterInitial = prefs.isAssistEnabled();
 
         addToggle(context, assistContainer, R.string.assist_master, masterInitial, enabled -> {
@@ -150,22 +162,33 @@ public final class DarkroomSheet {
                     prefs.setAssistExposure(enabled);
                     callbacks.onAssistSettingsChanged();
                 }, true);
-        subRows[2] = addToggle(context, assistContainer, R.string.assist_scene,
+        subRows[2] = addToggle(context, assistContainer, R.string.assist_meter_bar,
+                prefs.isAssistMeterBar(), enabled -> {
+                    prefs.setAssistMeterBar(enabled);
+                    callbacks.onAssistSettingsChanged();
+                }, true);
+        subRows[3] = addToggle(context, assistContainer, R.string.assist_scene,
                 prefs.isAssistScene(), enabled -> {
                     prefs.setAssistScene(enabled);
                     callbacks.onAssistSettingsChanged();
                 }, true);
-        subRows[3] = addToggle(context, assistContainer, R.string.assist_stability,
+        subRows[4] = addToggle(context, assistContainer, R.string.assist_stability,
                 prefs.isAssistStability(), enabled -> {
                     prefs.setAssistStability(enabled);
                     callbacks.onAssistSettingsChanged();
                 }, true);
-        subRows[4] = addToggle(context, assistContainer, R.string.assist_steady_shutter,
+        subRows[5] = addToggle(context, assistContainer, R.string.assist_steady_shutter,
                 prefs.isAssistSteadyShutter(), enabled -> {
                     prefs.setAssistSteadyShutter(enabled);
                     callbacks.onAssistSettingsChanged();
                 }, false);
         updateAssistChildrenEnabled(subRows, masterInitial);
+
+        // Theme Practice Rolls section ("摄影练习卷")
+        LinearLayout practiceContainer = dialog.findViewById(R.id.practiceRollContainer);
+        if (practiceContainer != null) {
+            buildPracticeRows(context, mono, practiceContainer, prefs, callbacks, dialog);
+        }
 
         // Calibration buttons
         TextView rotateBtn = dialog.findViewById(R.id.sheetRotateButton);
@@ -275,6 +298,82 @@ public final class DarkroomSheet {
                     ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, FilmUiHelper.dp(context, 1))));
         }
         return new ToggleRow(row, label, sw);
+    }
+
+    private static void buildPracticeRows(Context context, Typeface mono, LinearLayout parent,
+                                          CameraPrefs prefs, Callbacks callbacks, Dialog dialog) {
+        parent.removeAllViews();
+        boolean zh = context.getResources().getConfiguration().getLocales().get(0)
+                .getLanguage().startsWith("zh");
+        PracticeRoll.Theme activeTheme = prefs.getPracticeTheme();
+        int activeStep = prefs.getPracticeStep();
+        PracticeRoll.Theme[] themes = PracticeRoll.Theme.values();
+
+        int paperColor = context.getResources().getColor(R.color.paper, context.getTheme());
+        int dimColor = context.getResources().getColor(R.color.paper_dim, context.getTheme());
+        int amberColor = context.getResources().getColor(R.color.amber_led, context.getTheme());
+        int hairlineColor = context.getResources().getColor(R.color.hairline_soft, context.getTheme());
+        int padV = FilmUiHelper.dp(context, 10);
+
+        for (int i = 0; i < themes.length; i++) {
+            PracticeRoll.Theme theme = themes[i];
+            boolean isActive = (theme == activeTheme);
+
+            LinearLayout row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackgroundResource(R.drawable.bg_row_ripple);
+            row.setPadding(0, padV, 0, padV);
+
+            TextView title = new TextView(context);
+            title.setTextAppearance(R.style.TextLabel);
+            title.setText(PracticeRoll.themeTitle(theme, zh));
+            title.setTextColor(isActive ? amberColor : paperColor);
+            row.addView(title, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView badge = new TextView(context);
+            badge.setTextAppearance(R.style.TextMonoCaption);
+            badge.setTypeface(mono, isActive ? Typeface.BOLD : Typeface.NORMAL);
+            badge.setText(isActive
+                    ? context.getString(R.string.practice_active, activeStep + 1)
+                    : context.getString(R.string.practice_start));
+            badge.setTextColor(isActive ? amberColor : dimColor);
+            row.addView(badge);
+
+            row.setOnClickListener(v -> {
+                if (!isActive) {
+                    prefs.setPracticeState(theme, 0);
+                }
+                callbacks.onPracticeRollSelected(theme);
+                dialog.dismiss();
+            });
+            parent.addView(row);
+
+            if (i < themes.length - 1 || activeTheme != null) {
+                View div = new View(context);
+                div.setBackgroundColor(hairlineColor);
+                parent.addView(div, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, FilmUiHelper.dp(context, 1))));
+            }
+        }
+
+        if (activeTheme != null) {
+            TextView exitBtn = new TextView(context);
+            exitBtn.setTextAppearance(R.style.TextMonoCaption);
+            exitBtn.setTypeface(mono);
+            exitBtn.setText(R.string.practice_exit);
+            exitBtn.setTextColor(dimColor);
+            exitBtn.setGravity(Gravity.CENTER);
+            exitBtn.setBackgroundResource(R.drawable.bg_row_ripple);
+            exitBtn.setPadding(0, padV, 0, padV);
+            exitBtn.setOnClickListener(v -> {
+                prefs.setPracticeState(null, 0);
+                callbacks.onPracticeRollSelected(null);
+                dialog.dismiss();
+            });
+            parent.addView(exitBtn);
+        }
     }
 
     private static void applyBottomInset(View view) {

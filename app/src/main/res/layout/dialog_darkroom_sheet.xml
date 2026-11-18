@@ -118,6 +118,19 @@
 
             <TextView
                 style="@style/SheetSectionLabel"
+                android:text="@string/sheet_practice" />
+
+            <LinearLayout
+                android:id="@+id/practiceRollContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_segment_container"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+
+            <TextView
+                style="@style/SheetSectionLabel"
                 android:text="@string/sheet_calibration" />
 
             <LinearLayout

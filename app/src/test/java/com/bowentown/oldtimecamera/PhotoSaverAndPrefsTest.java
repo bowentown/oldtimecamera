@@ -230,4 +230,37 @@ public class PhotoSaverAndPrefsTest {
         assertEquals(1, FilmPresets.indexOfId(null));
         assertEquals(1, FilmPresets.indexOfId("nonexistent"));
     }
+
+    @Test
+    public void sprocketPaperHalfFrameQuadGridAndExifFormatting_workCleanly() {
+        int[] sp = PhotoSaver.computePaperGeometry(1200, 1600,
+                CameraPrefs.PaperStyle.SPROCKET_35MM, CameraPrefs.AspectRatio.RATIO_3_4);
+        assertTrue(sp[0] > 60 && sp[1] > 60);
+        assertEquals(1200 + sp[0] * 2, sp[2]);
+
+        assertEquals(36, CameraPrefs.framesForMode(CameraPrefs.ShootMode.SINGLE));
+        assertEquals(72, CameraPrefs.framesForMode(CameraPrefs.ShootMode.HALF_FRAME));
+        CameraPrefs.ShootMode sm = CameraPrefs.ShootMode.SINGLE;
+        for (int i = 0; i < CameraPrefs.ShootMode.values().length; i++) {
+            sm = sm.next();
+        }
+        assertEquals(CameraPrefs.ShootMode.SINGLE, sm);
+
+        assertTrue(PhotoSaver.shouldPairHalfFrameSideBySide(false));
+        assertEquals(false, PhotoSaver.shouldPairHalfFrameSideBySide(true));
+
+        assertArrayEquals(new int[]{2, 2}, PhotoSaver.computeQuadGridDimensions(900, 1200));
+        assertArrayEquals(new int[]{1, 4}, PhotoSaver.computeQuadGridDimensions(1600, 900));
+
+        assertEquals("1/125s · f/1.8 · ISO 200",
+                PhotoSaver.formatShortExifStrings("0.008", "1.8", "200, 200"));
+        assertEquals("", PhotoSaver.formatShortExifStrings(null, "bad", ""));
+
+        String extComment = PhotoSaver.buildRecipeComment(
+                FilmPresets.all()[1], false, true, 2, 14, 0,
+                new FilmRecipe(0.6f, 1.5f, 0.4f), true, CameraPrefs.ShootMode.HALF_FRAME);
+        assertTrue(extComment.contains("int=0.60"));
+        assertTrue(extComment.contains("mist=on"));
+        assertTrue(extComment.contains("mode=half_frame"));
+    }
 }

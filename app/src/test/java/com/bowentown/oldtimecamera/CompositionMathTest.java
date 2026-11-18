@@ -202,4 +202,39 @@ public class CompositionMathTest {
         assertEquals(0.8f, unmirroredManual[0], 1e-4f);
         assertEquals(0.7f, unmirroredManual[1], 1e-4f);
     }
+
+    @Test
+    public void guideTemplatesAndFramingAdvice_stayBoundedAndTrackHeadroom() {
+        assertEquals(0, CompositionMath.buildTemplateShapes(CompositionMath.GuideTemplate.NONE).length);
+        CompositionMath.GuideTemplate cur = CompositionMath.GuideTemplate.NONE;
+        for (int i = 0; i < CompositionMath.GuideTemplate.values().length; i++) {
+            cur = cur.next();
+            if (cur != CompositionMath.GuideTemplate.NONE) {
+                CompositionMath.GuideShape[] shapes = CompositionMath.buildTemplateShapes(cur);
+                assertTrue(shapes.length >= 3);
+                for (CompositionMath.GuideShape s : shapes) {
+                    assertTrue(s.a >= 0f && s.a <= 1f);
+                    assertTrue(s.b >= 0f && s.b <= 1f);
+                    assertTrue(s.c >= 0f && s.c <= 1f);
+                    assertTrue(s.d >= 0f && s.d <= 1f);
+                }
+            }
+        }
+        assertEquals(CompositionMath.GuideTemplate.NONE, cur);
+
+        CompositionMath.FramingAdvice offCenter = CompositionMath.evaluateFraming(
+                0.15f, 0.15f, true, 0.04f, CompositionMath.GridMode.THIRDS, 0, -1);
+        assertTrue(offCenter.hasSubject);
+        assertFalse(offCenter.locked);
+        assertTrue(offCenter.showArrow);
+        assertTrue(offCenter.headroomTight);
+        assertEquals(1f / 3f, offCenter.targetX, 1e-4f);
+        assertEquals(1f / 3f, offCenter.targetY, 1e-4f);
+
+        CompositionMath.FramingAdvice onPoint = CompositionMath.evaluateFraming(
+                0.34f, 0.34f, true, 0.20f, CompositionMath.GridMode.THIRDS, 0, 0);
+        assertTrue(onPoint.locked);
+        assertFalse(onPoint.showArrow);
+        assertFalse(onPoint.headroomTight);
+    }
 }

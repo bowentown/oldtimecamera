@@ -20,6 +20,10 @@ public final class FilmUiHelper {
         void onSelected(int index);
     }
 
+    public interface OnChipLongClickListener {
+        boolean onLongClick(int index);
+    }
+
     private static volatile Typeface cachedMono;
 
     private FilmUiHelper() {}
@@ -80,49 +84,92 @@ public final class FilmUiHelper {
                                       FilmPreset[] presets,
                                       List<LinearLayout> outChips,
                                       OnChipSelectedListener listener) {
+        buildFilmStrip(context, scroller, container, presets, null, outChips, listener, null);
+    }
+
+    /**
+     * Populates built-in film stocks plus optional user-saved custom recipes, supporting
+     * long-press tuning or custom deletion.
+     */
+    public static void buildFilmStrip(Context context,
+                                      HorizontalScrollView scroller,
+                                      LinearLayout container,
+                                      FilmPreset[] presets,
+                                      List<FilmRecipe.SavedRecipe> customRecipes,
+                                      List<LinearLayout> outChips,
+                                      OnChipSelectedListener listener,
+                                      OnChipLongClickListener longListener) {
         outChips.clear();
         container.removeAllViews();
+        int chipIdx = 0;
+
+        for (FilmPreset preset : presets) {
+            addFilmChip(context, scroller, container, outChips,
+                    preset.name, preset.swatch, false, chipIdx, listener, longListener);
+            chipIdx++;
+        }
+        if (customRecipes != null) {
+            for (FilmRecipe.SavedRecipe recipe : customRecipes) {
+                if (recipe == null) continue;
+                int baseIdx = FilmPresets.indexOfId(recipe.basePresetId);
+                int swatch = presets[baseIdx].swatch;
+                addFilmChip(context, scroller, container, outChips,
+                        recipe.name, swatch, true, chipIdx, listener, longListener);
+                chipIdx++;
+            }
+        }
+    }
+
+    private static void addFilmChip(Context context,
+                                    HorizontalScrollView scroller,
+                                    LinearLayout container,
+                                    List<LinearLayout> outChips,
+                                    String labelText,
+                                    int swatchColor,
+                                    boolean customRing,
+                                    int index,
+                                    OnChipSelectedListener listener,
+                                    OnChipLongClickListener longListener) {
         int padH = dp(context, 12);
-        int dotSize = dp(context, 6);
+        int dotSize = dp(context, customRing ? 7 : 6);
         int chipH = dp(context, 32);
         int marginH = dp(context, 4);
 
-        for (int i = 0; i < presets.length; i++) {
-            FilmPreset preset = presets[i];
-            LinearLayout chip = new LinearLayout(context);
-            chip.setOrientation(LinearLayout.HORIZONTAL);
-            chip.setGravity(Gravity.CENTER_VERTICAL);
-            chip.setPadding(padH, 0, padH, 0);
-            chip.setBackgroundResource(R.drawable.bg_chip);
+        LinearLayout chip = new LinearLayout(context);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(padH, 0, padH, 0);
+        chip.setBackgroundResource(R.drawable.bg_chip);
 
-            View dot = new View(context);
-            GradientDrawable dotBg = new GradientDrawable();
-            dotBg.setShape(GradientDrawable.OVAL);
-            dotBg.setColor(preset.swatch);
-            dotBg.setStroke(dp(context, 1), 0x44000000);
-            dot.setBackground(dotBg);
-            LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dotSize, dotSize);
-            dotLp.setMarginEnd(dp(context, 6));
-            chip.addView(dot, dotLp);
+        View dot = new View(context);
+        GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dotBg.setColor(swatchColor);
+        dotBg.setStroke(dp(context, customRing ? 2 : 1), customRing ? 0xFFF2A65A : 0x44000000);
+        dot.setBackground(dotBg);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dotSize, dotSize);
+        dotLp.setMarginEnd(dp(context, 6));
+        chip.addView(dot, dotLp);
 
-            TextView label = new TextView(context);
-            label.setTextAppearance(R.style.FilmLabel);
-            label.setText(preset.name);
-            label.setSingleLine(true);
-            chip.addView(label);
+        TextView label = new TextView(context);
+        label.setTextAppearance(R.style.FilmLabel);
+        label.setText(labelText);
+        label.setSingleLine(true);
+        chip.addView(label);
 
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, chipH);
-            lp.setMargins(marginH, 0, marginH, 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, chipH);
+        lp.setMargins(marginH, 0, marginH, 0);
 
-            int index = i;
-            chip.setOnClickListener(v -> {
-                listener.onSelected(index);
-                centerChip(scroller, chip);
-            });
-            container.addView(chip, lp);
-            outChips.add(chip);
+        chip.setOnClickListener(v -> {
+            listener.onSelected(index);
+            centerChip(scroller, chip);
+        });
+        if (longListener != null) {
+            chip.setOnLongClickListener(v -> longListener.onLongClick(index));
         }
+        container.addView(chip, lp);
+        outChips.add(chip);
     }
 
     public static void updateChipSelection(Context context, List<LinearLayout> chips, int selectedIndex) {

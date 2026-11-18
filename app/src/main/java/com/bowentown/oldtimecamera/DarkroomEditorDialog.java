@@ -93,9 +93,12 @@ public final class DarkroomEditorDialog {
             try {
                 worker.execute(() -> {
                     try {
-                        Bitmap filtered = glEngine.renderPhoto(src, preset, boostGrain, leakEnabled, sessionSeed);
-                        Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
-                                prefs.getExposures() + 1, note);
+                        FilmPreset effective = prefs.getFilmRecipe().apply(preset);
+                        boolean blackMist = prefs.isBlackMistEnabled();
+                        Bitmap filtered = glEngine.renderPhoto(src, effective, boostGrain,
+                                leakEnabled, blackMist, sessionSeed);
+                        Bitmap print = PhotoSaver.applyPaper(activity, filtered, effective, paper,
+                                dateMode, aspect, prefs.getExposures() + 1, note);
                         if (print != filtered) filtered.recycle();
                         main.post(() -> {
                             if (seq != renderSeq.get() || !dialog.isShowing()) {
@@ -165,15 +168,20 @@ public final class DarkroomEditorDialog {
                         throw new IllegalStateException(activity.getString(R.string.editor_load_failed));
                     }
                     Bitmap cropped = PhotoSaver.cropToAspect(fullSrc, aspect);
-                    Bitmap filtered = glEngine.renderPhoto(cropped, preset, boostGrain, leakEnabled, sessionSeed);
+                    FilmRecipe recipe = prefs.getFilmRecipe();
+                    FilmPreset effective = recipe.apply(preset);
+                    boolean blackMist = prefs.isBlackMistEnabled();
+                    Bitmap filtered = glEngine.renderPhoto(cropped, effective, boostGrain,
+                            leakEnabled, blackMist, sessionSeed);
                     if (filtered != cropped) cropped.recycle();
-                    Bitmap print = PhotoSaver.applyPaper(activity, filtered, preset, paper, dateMode, aspect,
-                            nextFrame, note);
+                    Bitmap print = PhotoSaver.applyPaper(activity, filtered, effective, paper,
+                            dateMode, aspect, nextFrame, note);
                     if (print != filtered) filtered.recycle();
 
                     Uri savedUri = PhotoSaver.save(activity, print, null,
                             PhotoSaver.buildRecipeComment(preset, boostGrain, leakEnabled,
-                                    prefs.getRollNumber(), nextFrame, 0));
+                                    prefs.getRollNumber(), nextFrame, 0, recipe, blackMist,
+                                    CameraPrefs.ShootMode.SINGLE));
                     int thumbSize = FilmUiHelper.dp(activity, 96);
                     Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
                     print.recycle();
