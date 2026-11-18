@@ -207,17 +207,23 @@ public final class PhotoSaver {
         return out;
     }
 
-    /** Bilinearly scales a decoded bitmap so its longest side fits within maxEdge. */
+    /** Bilinearly scales a decoded bitmap so its longest side fits within maxEdge, recycling {@code src}. */
     public static Bitmap capEdge(Bitmap src, int maxEdge) {
+        Bitmap scaled = capEdgeNoRecycle(src, maxEdge);
+        if (scaled != src && src != null && !src.isRecycled()) {
+            src.recycle();
+        }
+        return scaled;
+    }
+
+    private static Bitmap capEdgeNoRecycle(Bitmap src, int maxEdge) {
         if (src == null || maxEdge <= 0) return src;
         int curLongest = Math.max(src.getWidth(), src.getHeight());
         if (curLongest <= maxEdge) return src;
         float scale = (float) maxEdge / (float) curLongest;
         int nw = Math.max(1, Math.round(src.getWidth() * scale));
         int nh = Math.max(1, Math.round(src.getHeight() * scale));
-        Bitmap scaled = Bitmap.createScaledBitmap(src, nw, nh, true);
-        if (scaled != src) src.recycle();
-        return scaled;
+        return Bitmap.createScaledBitmap(src, nw, nh, true);
     }
 
     /**
@@ -418,10 +424,10 @@ public final class PhotoSaver {
         }
 
         // Cap individual cell to keep total composite well inside 2560px texture limits.
-        int cellLimit = sideBySide ? 1160 : 1160;
+        final int cellLimit = 1160;
         Bitmap cell1 = capEdgeNoRecycle(first, cellLimit);
         Bitmap cell2 = capEdgeNoRecycle(alignedSecond, cellLimit);
-        if (alignedSecond != second && !alignedSecond.isRecycled()) {
+        if (alignedSecond != second && alignedSecond != cell2 && !alignedSecond.isRecycled()) {
             alignedSecond.recycle();
         }
 
@@ -455,86 +461,6 @@ public final class PhotoSaver {
         if (cell1 != first) cell1.recycle();
         if (cell2 != second) cell2.recycle();
         return out;
-    }
-
-    /**
-     * Computes grid {@code [cols, rows]} for a 4-frame action strip: vertical 1x4 film strip
-     * for horizontal frames, and balanced 2x2 contact quad for tall portrait frames.
-     */
-    public static int[] computeQuadGridDimensions(int frameW, int frameH) {
-        if (frameW <= 0 || frameH <= 0) return new int[]{2, 2};
-        float ratio = (float) frameW / (float) frameH;
-        return ratio >= 1.15f ? new int[]{1, 4} : new int[]{2, 2};
-    }
-
-    /** Composes 2..4 burst frames into a sleek darkroom multi-frame strip or 2x2 quad plate. */
-    public static Bitmap composeQuadActionStrip(Context context, List<Bitmap> frames, int baseFrameNumber) {
-        if (frames == null || frames.isEmpty()) return null;
-        Bitmap first = frames.get(0);
-        int[] grid = computeQuadGridDimensions(first.getWidth(), first.getHeight());
-        int cols = grid[0];
-        int rows = grid[1];
-        int maxCells = Math.min(4, frames.size());
-        int cellMax = (cols == 1) ? 960 : 1080;
-
-        Bitmap[] cells = new Bitmap[maxCells];
-        int cw = 0;
-        int ch = 0;
-        for (int i = 0; i < maxCells; i++) {
-            Bitmap src = frames.get(i);
-            Bitmap scaled = capEdgeNoRecycle(src, cellMax);
-            if (i == 0) {
-                cw = scaled.getWidth();
-                ch = scaled.getHeight();
-            } else if (scaled.getWidth() != cw || scaled.getHeight() != ch) {
-                Bitmap fit = Bitmap.createScaledBitmap(scaled, cw, ch, true);
-                if (scaled != src) scaled.recycle();
-                scaled = fit;
-            }
-            cells[i] = scaled;
-        }
-
-        int shortSide = Math.min(cw, ch);
-        int gap = Math.max(8, Math.round(shortSide * 0.026f));
-        int outer = Math.max(14, Math.round(shortSide * 0.036f));
-        int labelH = Math.max(18, Math.round(shortSide * 0.038f));
-
-        int outW = outer * 2 + cols * cw + Math.max(0, cols - 1) * gap;
-        int outH = outer * 2 + rows * (ch + labelH) + Math.max(0, rows - 1) * gap;
-
-        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(out);
-        canvas.drawColor(0xFF13110F);
-
-        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-        text.setTypeface(FilmUiHelper.monoFont(context));
-        text.setColor(0xFFF2A65A);
-        text.setTextSize(Math.max(12f, shortSide * 0.025f));
-        text.setTextAlign(Paint.Align.LEFT);
-
-        for (int i = 0; i < maxCells; i++) {
-            int col = i % cols;
-            int row = i / cols;
-            int x = outer + col * (cw + gap);
-            int y = outer + row * (ch + labelH + gap);
-            canvas.drawBitmap(cells[i], x, y, null);
-            canvas.drawText(String.format(Locale.US, "%02d·%d", Math.max(1, baseFrameNumber), i + 1),
-                    x + 4f, y + ch + labelH * 0.72f, text);
-            if (cells[i] != frames.get(i) && !cells[i].isRecycled()) {
-                cells[i].recycle();
-            }
-        }
-        return out;
-    }
-
-    private static Bitmap capEdgeNoRecycle(Bitmap src, int maxEdge) {
-        if (src == null || maxEdge <= 0) return src;
-        int longest = Math.max(src.getWidth(), src.getHeight());
-        if (longest <= maxEdge) return src;
-        float scale = (float) maxEdge / (float) longest;
-        return Bitmap.createScaledBitmap(src,
-                Math.max(1, Math.round(src.getWidth() * scale)),
-                Math.max(1, Math.round(src.getHeight() * scale)), true);
     }
 
     /**

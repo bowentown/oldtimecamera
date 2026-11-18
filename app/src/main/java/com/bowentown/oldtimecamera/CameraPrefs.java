@@ -55,8 +55,7 @@ public final class CameraPrefs {
     public enum ShootMode {
         SINGLE,
         DOUBLE_EXP,
-        HALF_FRAME,
-        QUAD_STRIP;
+        HALF_FRAME;
 
         public ShootMode next() {
             ShootMode[] all = values();
@@ -105,10 +104,8 @@ public final class CameraPrefs {
     private static final String KEY_GRID = "grid_enabled";
     private static final String KEY_GRID_MODE = "grid_mode";
     private static final String KEY_GOLDEN_ROT = "golden_rot";
-    private static final String KEY_GUIDE_TEMPLATE = "guide_template";
     private static final String KEY_SHOOT_MODE = "shoot_mode";
     private static final String KEY_BLACK_MIST = "black_mist";
-    private static final String KEY_SHAKE_LEAK = "shake_leak";
     private static final String KEY_SOUND = "shutter_sound";
     private static final String KEY_FRONT_MIRROR = "front_mirror";
     private static final String KEY_TIMER_SECONDS = "timer_seconds";
@@ -116,28 +113,20 @@ public final class CameraPrefs {
     private static final String KEY_MANUAL_ROTATION = "manual_rotation";
     private static final String KEY_LAST_PHOTO_URI = "last_photo_uri";
 
-    private static final String KEY_ASSIST_ENABLED = "assist_enabled";
-    private static final String KEY_ASSIST_COMP = "assist_comp";
     private static final String KEY_ASSIST_EXPOSURE = "assist_exposure";
-    private static final String KEY_ASSIST_SCENE = "assist_scene";
-    private static final String KEY_ASSIST_STABILITY = "assist_stability";
     private static final String KEY_ASSIST_STEADY_SHUTTER = "assist_steady_shutter";
-    private static final String KEY_ASSIST_METER_BAR = "assist_meter_bar";
 
     private static final String KEY_RECIPE_INTENSITY = "recipe_intensity";
     private static final String KEY_RECIPE_GRAIN = "recipe_grain";
     private static final String KEY_RECIPE_WARMTH = "recipe_warmth";
     private static final String KEY_ACTIVE_CUSTOM_RECIPE = "active_custom_recipe";
     private static final String KEY_CUSTOM_RECIPES_RAW = "custom_recipes_raw";
-    private static final String KEY_PRACTICE_THEME = "practice_theme";
-    private static final String KEY_PRACTICE_STEP = "practice_step";
-    private static final String KEY_DIAGNOSTICS_LOG = "diagnostics_log";
 
     private static final String KEY_AI_PROVIDER = "ai_provider";
     private static final String KEY_AI_BASE_URL = "ai_base_url";
     private static final String KEY_AI_MODEL = "ai_model";
     private static final String KEY_AI_VISION = "ai_vision_enabled";
-    private static final String KEY_AI_CRITIQUES_LOG = "ai_critiques_log";
+    private static final String KEY_AI_ADVICE_LOG = "ai_advice_log";
 
     private final SharedPreferences sp;
 
@@ -285,44 +274,12 @@ public final class CameraPrefs {
         sp.edit().putInt(KEY_MANUAL_ROTATION, degrees).apply();
     }
 
-    public boolean isAssistEnabled() {
-        return sp.getBoolean(KEY_ASSIST_ENABLED, true);
-    }
-
-    public void setAssistEnabled(boolean enabled) {
-        sp.edit().putBoolean(KEY_ASSIST_ENABLED, enabled).apply();
-    }
-
-    public boolean isAssistComposition() {
-        return sp.getBoolean(KEY_ASSIST_COMP, true);
-    }
-
-    public void setAssistComposition(boolean enabled) {
-        sp.edit().putBoolean(KEY_ASSIST_COMP, enabled).apply();
-    }
-
     public boolean isAssistExposure() {
         return sp.getBoolean(KEY_ASSIST_EXPOSURE, true);
     }
 
     public void setAssistExposure(boolean enabled) {
         sp.edit().putBoolean(KEY_ASSIST_EXPOSURE, enabled).apply();
-    }
-
-    public boolean isAssistScene() {
-        return sp.getBoolean(KEY_ASSIST_SCENE, true);
-    }
-
-    public void setAssistScene(boolean enabled) {
-        sp.edit().putBoolean(KEY_ASSIST_SCENE, enabled).apply();
-    }
-
-    public boolean isAssistStability() {
-        return sp.getBoolean(KEY_ASSIST_STABILITY, true);
-    }
-
-    public void setAssistStability(boolean enabled) {
-        sp.edit().putBoolean(KEY_ASSIST_STABILITY, enabled).apply();
     }
 
     public boolean isAssistSteadyShutter() {
@@ -347,16 +304,6 @@ public final class CameraPrefs {
         sp.edit().putString(KEY_LAST_PHOTO_URI, uri == null ? null : uri.toString()).apply();
     }
 
-    public CompositionMath.GuideTemplate getGuideTemplate() {
-        return CompositionMath.GuideTemplate.fromName(sp.getString(KEY_GUIDE_TEMPLATE, null));
-    }
-
-    public void setGuideTemplate(CompositionMath.GuideTemplate template) {
-        CompositionMath.GuideTemplate safe = template != null
-                ? template : CompositionMath.GuideTemplate.NONE;
-        sp.edit().putString(KEY_GUIDE_TEMPLATE, safe.name()).apply();
-    }
-
     public ShootMode getShootMode() {
         return ShootMode.fromName(sp.getString(KEY_SHOOT_MODE, ShootMode.SINGLE.name()));
     }
@@ -372,22 +319,6 @@ public final class CameraPrefs {
 
     public void setBlackMistEnabled(boolean enabled) {
         sp.edit().putBoolean(KEY_BLACK_MIST, enabled).apply();
-    }
-
-    public boolean isShakeLeakEnabled() {
-        return sp.getBoolean(KEY_SHAKE_LEAK, true);
-    }
-
-    public void setShakeLeakEnabled(boolean enabled) {
-        sp.edit().putBoolean(KEY_SHAKE_LEAK, enabled).apply();
-    }
-
-    public boolean isAssistMeterBar() {
-        return sp.getBoolean(KEY_ASSIST_METER_BAR, true);
-    }
-
-    public void setAssistMeterBar(boolean enabled) {
-        sp.edit().putBoolean(KEY_ASSIST_METER_BAR, enabled).apply();
     }
 
     public FilmRecipe getFilmRecipe() {
@@ -420,34 +351,6 @@ public final class CameraPrefs {
 
     public void setSavedRecipes(java.util.List<FilmRecipe.SavedRecipe> recipes) {
         sp.edit().putString(KEY_CUSTOM_RECIPES_RAW, FilmRecipe.encodeSavedList(recipes)).apply();
-    }
-
-    public PracticeRoll.Theme getPracticeTheme() {
-        return PracticeRoll.Theme.fromName(sp.getString(KEY_PRACTICE_THEME, null));
-    }
-
-    public int getPracticeStep() {
-        return Math.max(0, Math.min(PracticeRoll.ROLL_FRAMES - 1, sp.getInt(KEY_PRACTICE_STEP, 0)));
-    }
-
-    public void setPracticeState(PracticeRoll.Theme theme, int stepIndex) {
-        int clamped = Math.max(0, Math.min(PracticeRoll.ROLL_FRAMES - 1, stepIndex));
-        sp.edit()
-                .putString(KEY_PRACTICE_THEME, theme == null ? null : theme.name())
-                .putInt(KEY_PRACTICE_STEP, theme == null ? 0 : clamped)
-                .apply();
-    }
-
-    public void recordShotDiagnostic(String fileKey, PracticeRoll.ShotDiagnostic diag) {
-        if (fileKey == null || fileKey.isEmpty() || diag == null) return;
-        java.util.Map<String, PracticeRoll.ShotDiagnostic> updated = putBoundedFirst(
-                fileKey, diag, PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, "")));
-        sp.edit().putString(KEY_DIAGNOSTICS_LOG, PracticeRoll.encodeDiagnosticLog(updated)).apply();
-    }
-
-    public PracticeRoll.ShotDiagnostic getShotDiagnostic(String fileKey) {
-        if (fileKey == null || fileKey.isEmpty()) return null;
-        return PracticeRoll.decodeDiagnosticLog(sp.getString(KEY_DIAGNOSTICS_LOG, "")).get(fileKey);
     }
 
     public AiCoachMath.ProviderPreset getAiProviderPreset() {
@@ -488,16 +391,16 @@ public final class CameraPrefs {
         sp.edit().putBoolean(KEY_AI_VISION, enabled).apply();
     }
 
-    public void recordAiCritique(String fileKey, AiCoachMath.AiCritique critique) {
-        if (fileKey == null || fileKey.isEmpty() || critique == null || critique.isEmpty()) return;
-        java.util.Map<String, AiCoachMath.AiCritique> updated = putBoundedFirst(
-                fileKey, critique, AiCoachMath.decodeCritiqueLog(sp.getString(KEY_AI_CRITIQUES_LOG, "")));
-        sp.edit().putString(KEY_AI_CRITIQUES_LOG, AiCoachMath.encodeCritiqueLog(updated)).apply();
+    public void recordAiAdvice(String fileKey, AiCoachMath.AiAdvice advice) {
+        if (fileKey == null || fileKey.isEmpty() || advice == null || advice.isEmpty()) return;
+        java.util.Map<String, AiCoachMath.AiAdvice> updated = putBoundedFirst(
+                fileKey, advice, AiCoachMath.decodeAdviceLog(sp.getString(KEY_AI_ADVICE_LOG, "")));
+        sp.edit().putString(KEY_AI_ADVICE_LOG, AiCoachMath.encodeAdviceLog(updated)).apply();
     }
 
-    public AiCoachMath.AiCritique getAiCritique(String fileKey) {
+    public AiCoachMath.AiAdvice getAiAdvice(String fileKey) {
         if (fileKey == null || fileKey.isEmpty()) return null;
-        return AiCoachMath.decodeCritiqueLog(sp.getString(KEY_AI_CRITIQUES_LOG, "")).get(fileKey);
+        return AiCoachMath.decodeAdviceLog(sp.getString(KEY_AI_ADVICE_LOG, "")).get(fileKey);
     }
 
     private static <V> java.util.Map<String, V> putBoundedFirst(

@@ -22,8 +22,7 @@
     <string name="hud_grid">GRID</string>
     <string name="hud_timer_off">TIMER</string>
     <string name="hud_double_exp">MODE</string>
-    <string name="hud_pose_guide">Pose Guide</string>
-    <string name="hud_meter_bar">Light Meter Bar</string>
+    <string name="hud_ai_coach">AI Coach</string>
     <string name="roll_placeholder">R01 · 00/36</string>
     <string name="zoom_default">1.0x</string>
     <string name="aspect_default">3:4</string>
@@ -32,25 +31,10 @@
     <string name="ev_zero">0.0</string>
     <string name="close">Close</string>
 
-    <string name="mode_single">1× Single</string>
-    <string name="mode_double">2× Double</string>
-    <string name="mode_half">½ Half</string>
-    <string name="mode_quad">4F Strip</string>
     <string name="hint_mode_single">Single Frame</string>
     <string name="hint_mode_double">2× Double Exp</string>
     <string name="hint_mode_half">½ Half-Frame (72)</string>
-    <string name="hint_mode_quad">4-Frame Strip</string>
     <string name="hint_half_first">½ Frame 1 set · Shoot 2nd to pair</string>
-    <string name="hint_quad_progress">Burst %1$d / 4…</string>
-    <string name="hint_leak_shuffled">Light leak shuffled</string>
-
-    <string name="pose_none">Guide Off</string>
-    <string name="pose_portrait">Portrait</string>
-    <string name="pose_back">Negative Space</string>
-    <string name="pose_low">Low Angle</string>
-    <string name="pose_symmetry">Symmetry</string>
-    <string name="pose_overhead">Flat Lay</string>
-    <string name="pose_diagonal">Diagonal</string>
 
     <string name="recipe_title">%1$s · Recipe</string>
     <string name="recipe_intensity">Strength</string>
@@ -68,8 +52,8 @@
     <string name="sheet_paper">BORDER</string>
     <string name="sheet_date">DATE</string>
     <string name="sheet_options">OPTICS &amp; FILM</string>
-    <string name="sheet_assist">COACH</string>
-    <string name="sheet_practice">PRACTICE ROLLS (6 FRAMES)</string>
+    <string name="sheet_assist">ASSIST</string>
+    <string name="sheet_ai">AI ADVISOR</string>
     <string name="sheet_calibration">CALIBRATE</string>
 
     <string name="paper_ivory">Ivory</string>
@@ -84,39 +68,22 @@
     <string name="grain_boost">Grain Boost</string>
     <string name="light_leak">Light Leak</string>
     <string name="black_mist">Black Mist Bloom</string>
-    <string name="shake_leak">Shake to Shuffle Leak</string>
     <string name="level_overlay">Horizon Level</string>
     <string name="shutter_sound">Shutter Sound</string>
     <string name="front_mirror">Front Mirror</string>
 
-    <string name="assist_master">Beginner Coach</string>
-    <string name="assist_comp">Framing Arrows</string>
-    <string name="assist_exposure">Exposure Hints</string>
-    <string name="assist_meter_bar">Analog Meter Bar</string>
-    <string name="assist_scene">Film Suggest</string>
-    <string name="assist_stability">Shake Alert</string>
+    <string name="assist_exposure">Exposure Hint</string>
     <string name="assist_steady_shutter">Steady Shutter</string>
-
-    <string name="practice_start">Load</string>
-    <string name="practice_active">%1$d/6</string>
-    <string name="practice_exit">Exit Practice Roll</string>
-    <string name="practice_done">Practice roll complete!</string>
-    <string name="practice_started">Loaded: %1$s</string>
-    <string name="hint_headroom_tight">More headroom</string>
 
     <string name="hint_overexposed">Bright · EV -</string>
     <string name="hint_underexposed">Dark · EV +</string>
     <string name="hint_backlit">Backlit · Tap</string>
-    <string name="hint_shake">Hold steady</string>
     <string name="hint_steady_wait">Steadying…</string>
     <string name="hint_grid_thirds">Rule of 3rds</string>
     <string name="hint_grid_golden">Golden Spiral</string>
     <string name="hint_grid_crosshair">Crosshair</string>
     <string name="hint_grid_off">Grid off</string>
     <string name="hint_golden_rotated">Spiral rotated</string>
-    <string name="scene_try_format">Try %1$s</string>
-    <string name="scene_suggest_icon">Scene Suggestion</string>
-    <string name="dismiss">Dismiss</string>
 
     <string name="rotate_viewfinder">Rotate</string>
     <string name="rotation_auto">Auto</string>
@@ -168,7 +135,6 @@
     <string name="gallery_deleted">Deleted</string>
     <string name="cancel">Cancel</string>
 
-    <string name="sheet_ai">AI ADVISOR</string>
     <string name="ai_config_entry">BYOK · Model &amp; Key</string>
     <string name="ai_status_unconfigured">Off</string>
     <string name="ai_title">AI FILM ADVISOR · BYOK</string>
@@ -196,19 +162,22 @@
     <string name="ai_err_no_key">Add your API key in Darkroom → AI Advisor first</string>
     <string name="ai_err_https_required">HTTPS URL required</string>
     <string name="ai_err_empty_reply">Empty model response</string>
+    <string name="ai_err_thinking_only">Model returned reasoning trace only; use deepseek-flash</string>
     <string name="ai_err_parse_recipe">Could not parse film recipe</string>
+
+    <string name="ai_coach_title">AI PHOTO COACH</string>
+    <string name="ai_coach_thinking">AI reading scene…</string>
+    <string name="ai_coach_failed">AI coach failed: %1$s</string>
+    <string name="ai_coach_refresh">Retry</string>
+    <string name="ai_coach_diag_label">NOTE</string>
+    <string name="ai_coach_act_label">TRY</string>
+    <string name="ai_coach_apply_btn">Apply: %1$s</string>
+    <string name="ai_coach_applied">Applied AI camera suggestions</string>
 
     <string name="gallery_ai_critique">AI Critique</string>
     <string name="ai_critique_thinking">AI reviewing print…</string>
     <string name="ai_critique_title">AI LAB REVIEW</string>
-    <string name="ai_critique_good">GOOD</string>
-    <string name="ai_critique_issue">FIX</string>
-    <string name="ai_critique_next">NEXT</string>
     <string name="ai_critique_retry">Retry</string>
-
-    <string name="hud_ai_inspire">AI Framing Tip</string>
-    <string name="ai_inspire_thinking">Reading frame…</string>
-    <string name="ai_inspire_failed">AI tip failed: %1$s</string>
 
     <string name="recipe_ai_btn">✦ AI Mix</string>
     <string name="ai_recipe_title">AI FILM COLORIST</string>

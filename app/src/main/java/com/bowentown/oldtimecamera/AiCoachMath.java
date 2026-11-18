@@ -8,9 +8,7 @@ import java.util.Map;
 
 /**
  * Pure-Java protocol, prompt, parsing, and sanitization helpers for the
- * BYOK (Bring Your Own Key) AI photography advisor. Keeps network payloads,
- * DeepSeek/OpenAI-compatible endpoint normalization, and strict response parsing
- * isolated and fully testable on the JVM without Android dependencies.
+ * BYOK (Bring Your Own Key) AI photography mentor.
  */
 public final class AiCoachMath {
 
@@ -42,19 +40,40 @@ public final class AiCoachMath {
         }
     }
 
-    public static final class AiCritique {
-        public final String strength;
-        public final String issue;
-        public final String nextAction;
+    /** Actionable coaching result usable both in viewfinder live advice and gallery lightbox review. */
+    public static final class AiAdvice {
+        public final String diagnosis;
+        public final String action;
+        public final String recommendedPresetId;
+        public final float evDelta;
+        public final CompositionMath.GridMode recommendedGrid;
 
-        public AiCritique(String strength, String issue, String nextAction) {
-            this.strength = cleanText(strength, 72);
-            this.issue = cleanText(issue, 72);
-            this.nextAction = cleanText(nextAction, 72);
+        public AiAdvice(String diagnosis, String action, String recommendedPresetId,
+                        float evDelta, CompositionMath.GridMode recommendedGrid) {
+            this.diagnosis = cleanText(diagnosis, 110);
+            this.action = cleanText(action, 140);
+            this.recommendedPresetId = resolveOptionalPresetId(recommendedPresetId);
+            this.evDelta = clampEv(evDelta);
+            this.recommendedGrid = (recommendedGrid == CompositionMath.GridMode.OFF)
+                    ? null : recommendedGrid;
         }
 
         public boolean isEmpty() {
-            return strength.isEmpty() && issue.isEmpty() && nextAction.isEmpty();
+            return diagnosis.isEmpty() && action.isEmpty();
+        }
+
+        public boolean hasActionablePresetChange(String activePresetId) {
+            return !recommendedPresetId.isEmpty() && !recommendedPresetId.equals(activePresetId);
+        }
+
+        public boolean hasActionableGridChange(CompositionMath.GridMode activeGrid) {
+            return recommendedGrid != null && recommendedGrid != activeGrid;
+        }
+
+        public boolean hasCameraTweaks(String activePresetId, CompositionMath.GridMode activeGrid) {
+            return hasActionablePresetChange(activePresetId)
+                    || Math.abs(evDelta) >= 0.25f
+                    || hasActionableGridChange(activeGrid);
         }
     }
 
@@ -77,11 +96,6 @@ public final class AiCoachMath {
 
     private AiCoachMath() {}
 
-    /**
-     * Resolves a user-supplied base URL into a chat-completions endpoint URL.
-     * Supports DeepSeek root URLs ({@code https://api.deepseek.com -> .../chat/completions}),
-     * OpenAI-style {@code .../v1} URLs, and full endpoint overrides.
-     */
     public static String normalizeEndpointUrl(String rawBaseUrl) {
         if (rawBaseUrl == null) return "";
         String s = rawBaseUrl.trim();
@@ -111,7 +125,10 @@ public final class AiCoachMath {
         return s + "/chat/completions";
     }
 
-    /** Requires HTTPS to protect the user's API key in transit and match Android default TLS rules. */
+    public static boolean isDeepSeekEndpoint(String endpointUrl) {
+        return endpointUrl != null && endpointUrl.toLowerCase(Locale.US).contains("deepseek.com");
+    }
+
     public static boolean isAllowedEndpointUrl(String endpointUrl) {
         if (endpointUrl == null) return false;
         String lower = endpointUrl.trim().toLowerCase(Locale.US);
@@ -131,124 +148,142 @@ public final class AiCoachMath {
         return s.substring(0, prefixLen) + "•••" + s.substring(s.length() - 4);
     }
 
-    public static String buildCritiqueSystemPrompt(boolean zh) {
-        if (zh) {
-            return "你是一位克制、专业的街头与人像胶片摄影教练。只讲具体的构图、用光、曝光或机位细节，禁止客套和空泛夸奖。"
-                    + "必须只输出严格 JSON（不要 markdown 代码块）："
-                    + "{\"strength\":\"不超过22字的一个具体亮点\",\"issue\":\"不超过22字的一个具体遗憾（若无明显问题可写无明显短板）\",\"nextAction\":\"不超过24字的一句下一次实操改进\"}";
-        }
-        return "You are a concise, practical film photography coach. Focus strictly on composition, lighting, exposure, or camera angle with zero fluff. "
-                + "Output ONLY raw JSON: "
-                + "{\"strength\":\"<=12 words concrete strength\",\"issue\":\"<=12 words main flaw or Minor none\",\"nextAction\":\"<=14 words next actionable step\"}";
-    }
-
-    public static String buildCritiqueUserContext(String exifSummary, String diagLine,
-                                                  boolean withImage, boolean zh) {
+    private static String stockCatalogText() {
         StringBuilder sb = new StringBuilder();
-        if (zh) {
-            sb.append(withImage
-                    ? "请结合这张成片画面与下方拍摄参数，给出 3 句极简复盘。"
-                    : "当前仅传参数（未附图片），请基于参数与测光结论给出 3 句构图/曝光复盘。");
-        } else {
-            sb.append(withImage
-                    ? "Review this film print together with its capture metadata in 3 brief points."
-                    : "Metadata-only review (no image attached). Give 3 brief technical takeaways.");
-        }
-        if (exifSummary != null && !exifSummary.trim().isEmpty()) {
-            sb.append("\nEXIF: ").append(exifSummary.trim());
-        }
-        if (diagLine != null && !diagLine.trim().isEmpty()) {
-            sb.append("\nMetering/Coach: ").append(diagLine.trim());
+        FilmPreset[] all = FilmPresets.all();
+        for (int i = 0; i < all.length; i++) {
+            if (i > 0) sb.append("; ");
+            sb.append(all[i].id).append(':').append(all[i].name)
+                    .append('(').append(all[i].shortNote).append(')');
         }
         return sb.toString();
     }
 
-    public static String buildInspireSystemPrompt(boolean zh) {
+    public static String buildViewfinderCoachSystemPrompt(boolean zh) {
         if (zh) {
-            return "你是复古相机取景助手。根据当前取景画面（或测光数据），只给出1句立刻能执行的机位、视角、用光或主体走位建议。"
-                    + "要求：直接给动作，不超过24个汉字，不要标点堆砌，不要客套。";
+            return "你是直率且精通人像与街头胶片摄影的现场教练。直接看当前取景画面与测光参数，绝不说空洞夸奖或套话。"
+                    + "\n必须只输出严格 JSON（不要 markdown 代码块，不要前缀后缀）："
+                    + "\n{\"diagnosis\":\"1-2句(<=55字)直指最毁照片的具体物理问题，如杂乱背景物体/顶光鼻下阴影/眼镜反光/低机位大头畸变/过曝高光\","
+                    + "\"action\":\"1-2句(<=75字)手把手站位与机位改法：向哪边转身避光、手机抬高/放低多少、退步留白、视线看向哪里\","
+                    + "\"recommendedPresetId\":\"仅当换片更出片时从下方选1个ID，否则空串\","
+                    + "\"evDelta\":0.0,"
+                    + "\"recommendedGrid\":\"THIRDS|GOLDEN_SPIRAL|CROSSHAIR|\"}"
+                    + "\n说明：evDelta 为推荐增加或减少的曝光档位(-1.5..+1.5，无需调整填0)；可选胶片ID: "
+                    + stockCatalogText();
         }
-        return "You are an on-set vintage viewfinder coach. Give ONE immediate framing, angle, or light tip based on the preview. "
-                + "Maximum 18 words, plain text, no greeting.";
+        return "You are a candid, practical film photography coach reading a live camera preview. No flattery, no vague platitudes. "
+                + "Output ONLY raw JSON: "
+                + "{\"diagnosis\":\"1-2 crisp sentences(<=30 words) pinpointing concrete flaws like harsh overhead light, distracting background clutter, eyewear glare, low-angle distortion, or clipped highlights\","
+                + "\"action\":\"1-2 sentences(<=40 words) with exact physical steps: which way to turn, camera height/distance, head tilt, or background cleanup\","
+                + "\"recommendedPresetId\":\"one stock ID below only if switching improves the mood, else empty string\","
+                + "\"evDelta\":0.0,"
+                + "\"recommendedGrid\":\"THIRDS|GOLDEN_SPIRAL|CROSSHAIR|\"}"
+                + "\nValid evDelta [-1.5..+1.5], stock IDs: " + stockCatalogText();
     }
 
-    public static String buildPreviewTelemetrySummary(PreviewStats stats, float tiltDeg,
-                                                      String presetName, String aspectLabel,
-                                                      boolean zh) {
+    public static String buildPrintReviewSystemPrompt(boolean zh) {
+        if (zh) {
+            return "你是直言不讳的胶片暗房导师。看着成片与拍摄 EXIF 复盘，给出真正能提高下一张成片率的指导。"
+                    + "\n必须只输出严格 JSON（不要 markdown 代码块）："
+                    + "\n{\"diagnosis\":\"1-2句(<=60字)客观指出这张成片的优势与最核心短板（构图位置、光比反差、视角或背景干扰）\","
+                    + "\"action\":\"1-2句(<=80字)总结下次遇到同类光线与场景该怎么调整站位、光线方向、曝光或用哪类胶片\","
+                    + "\"recommendedPresetId\":\"可选胶片ID(见下)，无建议填空串\","
+                    + "\"evDelta\":0.0,"
+                    + "\"recommendedGrid\":\"\"}"
+                    + "\n可选胶片ID: " + stockCatalogText();
+        }
+        return "You are a sharp film darkroom mentor reviewing a finished print and its EXIF. Focus on craft and transferable lessons. "
+                + "Output ONLY raw JSON: "
+                + "{\"diagnosis\":\"1-2 concrete sentences(<=35 words) on framing, light contrast, and background cleanly\","
+                + "\"action\":\"1-2 concrete sentences(<=45 words) on what to do differently next shot\","
+                + "\"recommendedPresetId\":\"optional stock ID below else empty\","
+                + "\"evDelta\":0.0,\"recommendedGrid\":\"\"}"
+                + "\nStock IDs: " + stockCatalogText();
+    }
+
+    public static String buildViewfinderUserContext(
+            PreviewStats stats, float tiltDeg, String presetId, String presetName,
+            float currentEvStops, String aspectLabel, boolean facingFront,
+            boolean withImage, boolean zh) {
         StringBuilder sb = new StringBuilder();
-        if (presetName != null && !presetName.isEmpty()) {
-            sb.append(zh ? "胶片:" : "Stock:").append(presetName);
-        }
-        if (aspectLabel != null && !aspectLabel.isEmpty()) {
-            if (sb.length() > 0) sb.append(" | ");
-            sb.append(zh ? "画幅:" : "Aspect:").append(aspectLabel);
-        }
+        sb.append(withImage
+                ? (zh ? "请诊断这张当前取景画面，并给出可立刻执行的拍摄调整。" : "Diagnose this live viewfinder frame and give concrete adjustment steps.")
+                : (zh ? "当前无图片（纯参数模式），请基于测光与角度数据给拍摄建议。" : "Telemetry-only mode: give concrete exposure and framing advice."));
+        sb.append("\nCamera: lens=").append(facingFront ? "front" : "rear")
+                .append(" preset=").append(presetId).append('(').append(presetName).append(')')
+                .append(" aspect=").append(aspectLabel)
+                .append(String.format(Locale.US, " currentEV=%+.1f", currentEvStops));
         if (stats != null && stats.width > 0 && stats.height > 0) {
-            if (sb.length() > 0) sb.append(" | ");
             sb.append(String.format(Locale.US,
-                    "Luma:%.2f BrightClip:%.0f%% DarkClip:%.0f%% Center:%.2f Edge:%.2f SalientX:%.2f/%+.1fEV",
+                    "\nMetering: luma=%.2f highlightClip=%.0f%% shadowCrush=%.0f%% centerLuma=%.2f edgeLuma=%.2f needle=%+.1fEV",
                     stats.meanLuma, stats.clippedHighlights * 100f, stats.crushedShadows * 100f,
-                    stats.centerLuma, stats.borderLuma, stats.saliencyX,
-                    FilmRenderMath.meterNeedleStops(stats)));
+                    stats.centerLuma, stats.borderLuma, FilmRenderMath.meterNeedleStops(stats)));
         }
         if (Math.abs(tiltDeg) >= 1f) {
-            if (sb.length() > 0) sb.append(" | ");
-            sb.append(String.format(Locale.US, "Tilt:%+.1fdeg", tiltDeg));
+            sb.append(String.format(Locale.US, " tilt=%+.1fdeg", tiltDeg));
+        }
+        return sb.toString();
+    }
+
+    public static String buildPrintUserContext(String exifSummary, boolean withImage, boolean zh) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(withImage
+                ? (zh ? "请结合成片画面与拍摄参数，给出实用复盘与下次改进动作。" : "Review this print with its capture EXIF and state what to improve next time.")
+                : (zh ? "当前仅传参数（未附图片），请基于参数给出复盘建议。" : "Metadata-only review: analyze capture EXIF."));
+        if (exifSummary != null && !exifSummary.trim().isEmpty()) {
+            sb.append("\nEXIF: ").append(exifSummary.trim());
         }
         return sb.toString();
     }
 
     public static String buildRecipeSystemPrompt(boolean zh) {
-        StringBuilder stocks = new StringBuilder();
-        FilmPreset[] all = FilmPresets.all();
-        for (int i = 0; i < all.length; i++) {
-            if (i > 0) stocks.append("; ");
-            stocks.append(all[i].id).append('(').append(all[i].shortNote).append(')');
-        }
+        String stocks = stockCatalogText();
         if (zh) {
-            return "你是专业胶片调色师。根据用户的画面氛围描述，从以下内置胶片基底中挑选最接近的一个并微调三项参数与黑柔光开关。"
+            return "你是专业胶片调色师。根据用户描述挑选最接近的内置胶片基底并微调三项参数与黑柔光。"
                     + "\n可选 basePresetId: " + stocks
-                    + "\n规则：intensity∈[0.25,1.0](浓度), grainScale∈[0.0,2.0](颗粒倍率), warmth∈[-1.0,1.0](负冷正暖), blackMist=true/false(高光黑柔漫射), name不超过6个汉字或12字符。"
+                    + "\n规则：intensity∈[0.25,1.0], grainScale∈[0.0,2.0], warmth∈[-1.0,1.0](负冷正暖), blackMist=true/false, name不超过6个汉字或12字符。"
                     + "\n只输出严格 JSON："
-                    + "{\"basePresetId\":\"...\",\"name\":\"...\",\"intensity\":0.85,\"grainScale\":1.2,\"warmth\":0.2,\"blackMist\":false,\"reason\":\"不超过18字的调色思路\"}";
+                    + "{\"basePresetId\":\"...\",\"name\":\"...\",\"intensity\":0.85,\"grainScale\":1.2,\"warmth\":0.2,\"blackMist\":false,\"reason\":\"不超过20字的调色思路\"}";
         }
-        return "You are a film colorist. Pick the closest base film stock below and tune a custom recipe matching the user's mood."
+        return "You are a film colorist. Pick the closest base film stock below and tune a custom recipe."
                 + "\nValid basePresetId values: " + stocks
                 + "\nRanges: intensity[0.25..1.0], grainScale[0.0..2.0], warmth[-1.0..1.0], blackMist(bool), name<=12 chars."
                 + "\nOutput ONLY raw JSON: "
-                + "{\"basePresetId\":\"...\",\"name\":\"...\",\"intensity\":0.85,\"grainScale\":1.2,\"warmth\":0.2,\"blackMist\":false,\"reason\":\"<=12 words\"}";
+                + "{\"basePresetId\":\"...\",\"name\":\"...\",\"intensity\":0.85,\"grainScale\":1.2,\"warmth\":0.2,\"blackMist\":false,\"reason\":\"<=14 words\"}";
     }
 
-    public static AiCritique parseCritique(String raw, boolean zh) {
+    public static AiAdvice parseAdvice(String raw, boolean zh) {
         String cleaned = stripThinkingAndFences(raw);
         if (cleaned.isEmpty()) {
-            return new AiCritique("", "", "");
+            return new AiAdvice("", "", "", 0f, null);
         }
         String jsonObj = extractFirstJsonObject(cleaned);
         if (!jsonObj.isEmpty()) {
             Map<String, String> map = parseFlatJsonObject(jsonObj);
-            String s = cleanText(firstNonEmpty(map, "strength", "good", "highlight"), 72);
-            String i = cleanText(firstNonEmpty(map, "issue", "flaw", "weakness"), 72);
-            String n = cleanText(firstNonEmpty(map, "nextAction", "next", "tip", "suggestion"), 72);
-            if (!s.isEmpty() || !i.isEmpty() || !n.isEmpty()) {
-                return new AiCritique(s, i, n);
+            String diag = firstNonEmpty(map, "diagnosis", "issue", "problem", "strength");
+            String act = firstNonEmpty(map, "action", "howToShoot", "nextAction", "tip", "suggestion");
+            String preset = firstNonEmpty(map, "recommendedPresetId", "presetId", "film");
+            float ev = parseClampedFloat(firstNonEmpty(map, "evDelta", "recommendedEvDelta", "ev"),
+                    0f, -2.0f, 2.0f);
+            CompositionMath.GridMode grid = parseGridMode(firstNonEmpty(map, "recommendedGrid", "grid"));
+            if (!diag.isEmpty() || !act.isEmpty()) {
+                return new AiAdvice(diag, act, preset, ev, grid);
             }
         }
-        // Graceful fallback if an endpoint replied in plain text rather than JSON.
         String[] rawLines = cleaned.replace("\r", "").split("\n");
         List<String> lines = new ArrayList<>();
         for (String line : rawLines) {
-            String t = cleanText(line.replaceAll("^[-*•0-9.、\\s]+", ""), 72);
+            String t = cleanText(line.replaceAll("^[-*•0-9.、\\s]+", ""), 140);
             if (!t.isEmpty()) lines.add(t);
-            if (lines.size() >= 3) break;
+            if (lines.size() >= 2) break;
         }
         if (lines.isEmpty()) {
-            return new AiCritique(cleanText(cleaned, 72), "", "");
+            return new AiAdvice(cleanText(cleaned, 110), "", "", 0f, null);
         }
-        String s = lines.get(0);
-        String i = lines.size() > 1 ? lines.get(1) : (zh ? "画面整体成立" : "Clean overall frame");
-        String n = lines.size() > 2 ? lines.get(2) : (zh ? "保持当前节奏多拍一张微调角度" : "Shoot one more angle slightly closer");
-        return new AiCritique(s, i, n);
+        String diag = lines.get(0);
+        String act = lines.size() > 1 ? lines.get(1)
+                : (zh ? "保持视线平齐略微侧转避开杂乱背景后再按快门" : "Step sideways for a cleaner background and keep lens at eye level");
+        return new AiAdvice(diag, act, "", 0f, null);
     }
 
     public static AiRecipeProposal parseRecipeProposal(String raw, String fallbackPresetId, boolean zh) {
@@ -260,7 +295,7 @@ public final class AiCoachMath {
         if (map.isEmpty()) return null;
 
         String requestedId = firstNonEmpty(map, "basePresetId", "presetId", "base");
-        String validPresetId = resolveValidPresetId(requestedId, fallbackPresetId);
+        String validPresetId = resolveRequiredPresetId(requestedId, fallbackPresetId);
         FilmPreset base = FilmPresets.all()[FilmPresets.indexOfId(validPresetId)];
 
         float intensity = parseClampedFloat(map.get("intensity"), 0.85f,
@@ -280,46 +315,40 @@ public final class AiCoachMath {
                 new FilmRecipe(intensity, grainScale, warmth), blackMist, reason);
     }
 
-    public static String parseInspireTip(String raw) {
-        String cleaned = stripThinkingAndFences(raw);
-        if (cleaned.isEmpty()) return "";
-        cleaned = cleaned.replace('\n', ' ').replace('\r', ' ').trim();
-        if ((cleaned.startsWith("\"") && cleaned.endsWith("\""))
-                || (cleaned.startsWith("“") && cleaned.endsWith("”"))) {
-            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
-        }
-        return cleanText(cleaned, 48);
-    }
-
     // ------------------------------------------------------------------ persistence codec
 
-    public static String encodeCritiqueLog(Map<String, AiCritique> map) {
+    public static String encodeAdviceLog(Map<String, AiAdvice> map) {
         if (map == null || map.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, AiCritique> e : map.entrySet()) {
+        for (Map.Entry<String, AiAdvice> e : map.entrySet()) {
             String key = cleanDelim(e.getKey());
-            AiCritique c = e.getValue();
-            if (key.isEmpty() || c == null || c.isEmpty()) continue;
+            AiAdvice a = e.getValue();
+            if (key.isEmpty() || a == null || a.isEmpty()) continue;
             if (sb.length() > 0) sb.append('\n');
             sb.append(key).append('\t')
-                    .append(cleanDelim(c.strength)).append('\t')
-                    .append(cleanDelim(c.issue)).append('\t')
-                    .append(cleanDelim(c.nextAction));
+                    .append(cleanDelim(a.diagnosis)).append('\t')
+                    .append(cleanDelim(a.action)).append('\t')
+                    .append(cleanDelim(a.recommendedPresetId)).append('\t')
+                    .append(String.format(Locale.US, "%.2f", a.evDelta)).append('\t')
+                    .append(a.recommendedGrid != null ? a.recommendedGrid.name() : "");
         }
         return sb.toString();
     }
 
-    public static Map<String, AiCritique> decodeCritiqueLog(String raw) {
-        Map<String, AiCritique> out = new LinkedHashMap<>();
+    public static Map<String, AiAdvice> decodeAdviceLog(String raw) {
+        Map<String, AiAdvice> out = new LinkedHashMap<>();
         if (raw == null || raw.isEmpty()) return out;
         String[] lines = raw.split("\n");
         for (String line : lines) {
             if (line.trim().isEmpty()) continue;
             String[] parts = line.split("\t", -1);
-            if (parts.length < 4 || parts[0].isEmpty()) continue;
-            AiCritique c = new AiCritique(parts[1], parts[2], parts[3]);
-            if (!c.isEmpty()) {
-                out.put(parts[0], c);
+            if (parts.length < 3 || parts[0].isEmpty()) continue;
+            String preset = parts.length > 3 ? parts[3] : "";
+            float ev = parts.length > 4 ? parseClampedFloat(parts[4], 0f, -2f, 2f) : 0f;
+            CompositionMath.GridMode grid = parts.length > 5 ? parseGridMode(parts[5]) : null;
+            AiAdvice a = new AiAdvice(parts[1], parts[2], preset, ev, grid);
+            if (!a.isEmpty()) {
+                out.put(parts[0], a);
             }
         }
         return out;
@@ -330,7 +359,6 @@ public final class AiCoachMath {
     public static String stripThinkingAndFences(String raw) {
         if (raw == null) return "";
         String s = raw.trim();
-        // Remove <think>...</think> blocks emitted by reasoning models.
         while (true) {
             int start = s.indexOf("<think>");
             int end = s.indexOf("</think>");
@@ -476,19 +504,36 @@ public final class AiCoachMath {
         return sb.toString();
     }
 
-    private static String resolveValidPresetId(String candidate, String fallbackId) {
-        if (candidate != null) {
-            String trimmed = candidate.trim().toLowerCase(Locale.US);
-            for (FilmPreset p : FilmPresets.all()) {
-                if (p.id.equals(trimmed)) return p.id;
-            }
+    private static String resolveOptionalPresetId(String candidate) {
+        if (candidate == null) return "";
+        String trimmed = candidate.trim().toLowerCase(Locale.US);
+        if (trimmed.isEmpty()) return "";
+        for (FilmPreset p : FilmPresets.all()) {
+            if (p.id.equals(trimmed)) return p.id;
         }
-        if (fallbackId != null) {
-            for (FilmPreset p : FilmPresets.all()) {
-                if (p.id.equals(fallbackId)) return p.id;
-            }
-        }
-        return FilmPresets.all()[FilmPresets.DEFAULT_INDEX].id;
+        return "";
+    }
+
+    private static String resolveRequiredPresetId(String candidate, String fallbackId) {
+        String match = resolveOptionalPresetId(candidate);
+        if (!match.isEmpty()) return match;
+        String fb = resolveOptionalPresetId(fallbackId);
+        return !fb.isEmpty() ? fb : FilmPresets.all()[FilmPresets.DEFAULT_INDEX].id;
+    }
+
+    private static CompositionMath.GridMode parseGridMode(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return null;
+        String up = raw.trim().toUpperCase(Locale.US);
+        if ("THIRDS".equals(up)) return CompositionMath.GridMode.THIRDS;
+        if ("GOLDEN_SPIRAL".equals(up) || "GOLDEN".equals(up)) return CompositionMath.GridMode.GOLDEN_SPIRAL;
+        if ("CROSSHAIR".equals(up) || "CROSS".equals(up)) return CompositionMath.GridMode.CROSSHAIR;
+        return null;
+    }
+
+    private static float clampEv(float v) {
+        if (Float.isNaN(v) || Float.isInfinite(v)) return 0f;
+        float clamped = Math.max(-2.0f, Math.min(2.0f, v));
+        return Math.round(clamped * 10f) / 10f;
     }
 
     private static float parseClampedFloat(String raw, float fallback, float min, float max) {

@@ -257,15 +257,8 @@ public final class GalleryActivity extends ComponentActivity {
         worker.execute(() -> {
             Bitmap bmp = PhotoSaver.decodeScaledUri(this, item.uri, 2048);
             String exifSummary = PhotoSaver.readDisplayExifSummary(this, item.uri);
-            PracticeRoll.ShotDiagnostic diag = prefs.getShotDiagnostic(item.uri.toString());
-            AiCoachMath.AiCritique cachedAi = prefs.getAiCritique(item.uri.toString());
-            StringBuilder meta = new StringBuilder();
-            if (!exifSummary.isEmpty()) meta.append(exifSummary);
-            if (diag != null) {
-                if (meta.length() > 0) meta.append("  ·  ");
-                meta.append(diag.headline);
-            }
-            final String metaText = meta.toString();
+            AiCoachMath.AiAdvice cachedAi = prefs.getAiAdvice(item.uri.toString());
+            final String metaText = exifSummary;
             main.post(() -> {
                 if (lightboxIndex != index) {
                     if (bmp != null) bmp.recycle();
@@ -293,7 +286,7 @@ public final class GalleryActivity extends ComponentActivity {
             return;
         }
         String key = items.get(lightboxIndex).uri.toString();
-        AiCoachMath.AiCritique cached = prefs.getAiCritique(key);
+        AiCoachMath.AiAdvice cached = prefs.getAiAdvice(key);
         if (cached != null) {
             if (lightboxAiCard.getVisibility() == View.VISIBLE) {
                 lightboxAiCard.setVisibility(View.GONE);
@@ -315,7 +308,7 @@ public final class GalleryActivity extends ComponentActivity {
         final PhotoSaver.PhotoItem item = items.get(targetIdx);
         final String key = item.uri.toString();
         if (!forceRefresh) {
-            AiCoachMath.AiCritique cached = prefs.getAiCritique(key);
+            AiCoachMath.AiAdvice cached = prefs.getAiAdvice(key);
             if (cached != null) {
                 showCritiqueCard(cached);
                 return;
@@ -332,23 +325,21 @@ public final class GalleryActivity extends ComponentActivity {
                 .getLanguage().startsWith("zh");
         worker.execute(() -> {
             Bitmap scaled = null;
-            AiCoachMath.AiCritique critique = null;
+            AiCoachMath.AiAdvice advice = null;
             String err = null;
             try {
                 if (prefs.isAiVisionEnabled()) {
                     scaled = PhotoSaver.decodeScaledUri(this, item.uri, 768);
                 }
                 String exif = PhotoSaver.readDisplayExifSummary(this, item.uri);
-                PracticeRoll.ShotDiagnostic diag = prefs.getShotDiagnostic(key);
-                String diagLine = diag != null ? diag.singleLine() : "";
-                critique = AiCoachClient.critiquePhoto(this, prefs, scaled, exif, diagLine, zh);
-                prefs.recordAiCritique(key, critique);
+                advice = AiCoachClient.reviewPrint(this, prefs, scaled, exif, zh);
+                prefs.recordAiAdvice(key, advice);
             } catch (Exception e) {
                 err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             } finally {
                 if (scaled != null && !scaled.isRecycled()) scaled.recycle();
             }
-            final AiCoachMath.AiCritique res = critique;
+            final AiCoachMath.AiAdvice res = advice;
             final String failure = err;
             main.post(() -> {
                 aiBusy = false;
@@ -366,15 +357,24 @@ public final class GalleryActivity extends ComponentActivity {
         });
     }
 
-    private void showCritiqueCard(AiCoachMath.AiCritique c) {
+    private void showCritiqueCard(AiCoachMath.AiAdvice a) {
         lightboxAiStatus.setVisibility(View.GONE);
         lightboxAiRows.setVisibility(View.VISIBLE);
-        lightboxAiGood.setText(getString(R.string.ai_critique_good) + " · " + c.strength);
-        lightboxAiIssue.setText(getString(R.string.ai_critique_issue) + " · " + c.issue);
-        lightboxAiNext.setText(getString(R.string.ai_critique_next) + " · " + c.nextAction);
-        lightboxAiGood.setVisibility(c.strength.isEmpty() ? View.GONE : View.VISIBLE);
-        lightboxAiIssue.setVisibility(c.issue.isEmpty() ? View.GONE : View.VISIBLE);
-        lightboxAiNext.setVisibility(c.nextAction.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiGood.setText(getString(R.string.ai_coach_diag_label) + " · " + a.diagnosis);
+        lightboxAiIssue.setText(getString(R.string.ai_coach_act_label) + " · " + a.action);
+        StringBuilder tip = new StringBuilder();
+        if (!a.recommendedPresetId.isEmpty()) {
+            tip.append(FilmPresets.all()[FilmPresets.indexOfId(a.recommendedPresetId)].name);
+        }
+        if (Math.abs(a.evDelta) >= 0.25f) {
+            if (tip.length() > 0) tip.append(" · ");
+            tip.append(String.format(Locale.US, "EV %+.1f", a.evDelta));
+        }
+        String tipStr = tip.toString();
+        lightboxAiNext.setText(tipStr);
+        lightboxAiGood.setVisibility(a.diagnosis.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiIssue.setVisibility(a.action.isEmpty() ? View.GONE : View.VISIBLE);
+        lightboxAiNext.setVisibility(tipStr.isEmpty() ? View.GONE : View.VISIBLE);
         lightboxAiCard.setVisibility(View.VISIBLE);
     }
 

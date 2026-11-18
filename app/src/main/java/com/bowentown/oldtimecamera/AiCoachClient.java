@@ -17,8 +17,8 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Zero-dependency HTTPS client for OpenAI-compatible AI endpoints (DeepSeek default,
- * Qwen VL, OpenAI, or user-supplied proxies). Never runs in the background; executes
- * strictly on explicit user tap via caller-owned worker threads.
+ * Qwen VL, OpenAI, or custom proxies). Explicitly disables DeepSeek default Thinking Mode
+ * on direct coaching calls and never surfaces internal reasoning traces as user advice.
  */
 public final class AiCoachClient {
 
@@ -27,11 +27,9 @@ public final class AiCoachClient {
 
     public static final class PingResult {
         public final long latencyMs;
-        public final String modelEcho;
 
-        PingResult(long latencyMs, String modelEcho) {
+        PingResult(long latencyMs) {
             this.latencyMs = latencyMs;
-            this.modelEcho = modelEcho;
         }
     }
 
@@ -55,66 +53,62 @@ public final class AiCoachClient {
                 : rawModel.trim();
 
         long start = SystemClock.uptimeMillis();
-        String reply = requestChatCompletion(
-                endpoint, key, model,
+        requestChatCompletion(
+                context, endpoint, key, model,
                 zh ? "仅回复 OK" : "Reply OK only.",
-                "ping", null, 16, 0.0f);
+                "ping", null, 32, 0.0f);
         long elapsed = Math.max(1L, SystemClock.uptimeMillis() - start);
-        return new PingResult(elapsed, AiCoachMath.parseInspireTip(reply));
+        return new PingResult(elapsed);
     }
 
-    public static AiCoachMath.AiCritique critiquePhoto(
+    public static AiCoachMath.AiAdvice adviseViewfinder(
+            Context context, CameraPrefs prefs, Bitmap previewBitmap,
+            PreviewStats stats, float tiltDeg, String presetId, String presetName,
+            float currentEvStops, String aspectLabel, boolean facingFront,
+            boolean zh) throws Exception {
+        Config cfg = readConfig(context, prefs);
+        boolean useImage = cfg.visionEnabled && previewBitmap != null && !previewBitmap.isRecycled();
+        String jpegDataUrl = useImage ? encodeScaledDataUrl(previewBitmap, 640, 80) : null;
+        String userText = AiCoachMath.buildViewfinderUserContext(
+                stats, tiltDeg, presetId, presetName, currentEvStops, aspectLabel,
+                facingFront, useImage, zh);
+        String reply = requestChatCompletion(
+                context, cfg.endpointUrl, cfg.apiKey, cfg.model,
+                AiCoachMath.buildViewfinderCoachSystemPrompt(zh),
+                userText, jpegDataUrl, 700, 0.35f);
+        AiCoachMath.AiAdvice advice = AiCoachMath.parseAdvice(reply, zh);
+        if (advice.isEmpty()) {
+            throw new IllegalStateException(context.getString(R.string.ai_err_empty_reply));
+        }
+        return advice;
+    }
+
+    public static AiCoachMath.AiAdvice reviewPrint(
             Context context, CameraPrefs prefs, Bitmap sourceBitmap,
-            String exifSummary, String diagLine, boolean zh) throws Exception {
+            String exifSummary, boolean zh) throws Exception {
         Config cfg = readConfig(context, prefs);
         boolean useImage = cfg.visionEnabled && sourceBitmap != null && !sourceBitmap.isRecycled();
         String jpegDataUrl = useImage ? encodeScaledDataUrl(sourceBitmap, 768, 82) : null;
-        String system = AiCoachMath.buildCritiqueSystemPrompt(zh);
-        String userText = AiCoachMath.buildCritiqueUserContext(exifSummary, diagLine, useImage, zh);
+        String userText = AiCoachMath.buildPrintUserContext(exifSummary, useImage, zh);
         String reply = requestChatCompletion(
-                cfg.endpointUrl, cfg.apiKey, cfg.model, system, userText, jpegDataUrl, 220, 0.35f);
-        AiCoachMath.AiCritique critique = AiCoachMath.parseCritique(reply, zh);
-        if (critique.isEmpty()) {
+                context, cfg.endpointUrl, cfg.apiKey, cfg.model,
+                AiCoachMath.buildPrintReviewSystemPrompt(zh),
+                userText, jpegDataUrl, 700, 0.35f);
+        AiCoachMath.AiAdvice advice = AiCoachMath.parseAdvice(reply, zh);
+        if (advice.isEmpty()) {
             throw new IllegalStateException(context.getString(R.string.ai_err_empty_reply));
         }
-        return critique;
-    }
-
-    public static String inspireViewfinder(
-            Context context, CameraPrefs prefs, Bitmap previewBitmap,
-            PreviewStats stats, float tiltDeg, String presetName,
-            String aspectLabel, boolean zh) throws Exception {
-        Config cfg = readConfig(context, prefs);
-        boolean useImage = cfg.visionEnabled && previewBitmap != null && !previewBitmap.isRecycled();
-        String jpegDataUrl = useImage ? encodeScaledDataUrl(previewBitmap, 512, 76) : null;
-        String telemetry = AiCoachMath.buildPreviewTelemetrySummary(
-                stats, tiltDeg, presetName, aspectLabel, zh);
-        String userText;
-        if (zh) {
-            userText = (useImage ? "这是当前取景框预览。" : "当前为纯文本测光模式。")
-                    + (telemetry.isEmpty() ? "" : "\n实时参数：" + telemetry);
-        } else {
-            userText = (useImage ? "Current viewfinder preview." : "Telemetry-only mode.")
-                    + (telemetry.isEmpty() ? "" : "\nTelemetry: " + telemetry);
-        }
-        String reply = requestChatCompletion(
-                cfg.endpointUrl, cfg.apiKey, cfg.model,
-                AiCoachMath.buildInspireSystemPrompt(zh), userText, jpegDataUrl, 96, 0.45f);
-        String tip = AiCoachMath.parseInspireTip(reply);
-        if (tip.isEmpty()) {
-            throw new IllegalStateException(context.getString(R.string.ai_err_empty_reply));
-        }
-        return tip;
+        return advice;
     }
 
     public static AiCoachMath.AiRecipeProposal generateRecipe(
             Context context, CameraPrefs prefs, String moodPrompt,
             String fallbackPresetId, boolean zh) throws Exception {
         Config cfg = readConfig(context, prefs);
-        String system = AiCoachMath.buildRecipeSystemPrompt(zh);
         String reply = requestChatCompletion(
-                cfg.endpointUrl, cfg.apiKey, cfg.model,
-                system, moodPrompt == null ? "" : moodPrompt.trim(), null, 220, 0.55f);
+                context, cfg.endpointUrl, cfg.apiKey, cfg.model,
+                AiCoachMath.buildRecipeSystemPrompt(zh),
+                moodPrompt == null ? "" : moodPrompt.trim(), null, 500, 0.5f);
         AiCoachMath.AiRecipeProposal proposal =
                 AiCoachMath.parseRecipeProposal(reply, fallbackPresetId, zh);
         if (proposal == null) {
@@ -148,9 +142,7 @@ public final class AiCoachClient {
         if (!AiCoachMath.isAllowedEndpointUrl(endpoint)) {
             throw new IllegalArgumentException(context.getString(R.string.ai_err_https_required));
         }
-        String model = prefs.getAiModel();
-        boolean vision = prefs.isAiVisionEnabled();
-        return new Config(endpoint, key, model, vision);
+        return new Config(endpoint, key, prefs.getAiModel(), prefs.isAiVisionEnabled());
     }
 
     private static String encodeScaledDataUrl(Bitmap src, int maxEdge, int quality) {
@@ -178,7 +170,7 @@ public final class AiCoachClient {
     }
 
     private static String requestChatCompletion(
-            String endpointUrl, String apiKey, String model,
+            Context context, String endpointUrl, String apiKey, String model,
             String systemPrompt, String userText, String imageDataUrl,
             int maxTokens, float temperature) throws Exception {
         JSONObject payload = new JSONObject();
@@ -186,6 +178,11 @@ public final class AiCoachClient {
         payload.put("max_tokens", maxTokens);
         payload.put("temperature", temperature);
         payload.put("stream", false);
+        // deepseek-flash enables thinking mode by default, which can consume short budgets
+        // inside reasoning_content and leave message.content empty unless disabled cleanly.
+        if (AiCoachMath.isDeepSeekEndpoint(endpointUrl)) {
+            payload.put("thinking", new JSONObject().put("type", "disabled"));
+        }
 
         JSONArray messages = new JSONArray();
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
@@ -242,13 +239,13 @@ public final class AiCoachClient {
             if (code < 200 || code >= 300) {
                 throw new IllegalStateException(formatHttpError(code, respText));
             }
-            return extractAssistantContent(respText);
+            return extractAssistantContent(context, respText);
         } finally {
             conn.disconnect();
         }
     }
 
-    private static String extractAssistantContent(String jsonBody) throws Exception {
+    private static String extractAssistantContent(Context context, String jsonBody) throws Exception {
         JSONObject root = new JSONObject(jsonBody);
         JSONArray choices = root.optJSONArray("choices");
         if (choices == null || choices.length() == 0) return "";
@@ -256,6 +253,7 @@ public final class AiCoachClient {
         if (first == null) return "";
         JSONObject msg = first.optJSONObject("message");
         if (msg == null) return "";
+
         Object rawContent = msg.opt("content");
         if (rawContent instanceof String) {
             String s = ((String) rawContent).trim();
@@ -272,7 +270,12 @@ public final class AiCoachClient {
             }
             if (sb.length() > 0) return sb.toString().trim();
         }
-        return msg.optString("reasoning_content", "").trim();
+
+        // Never surface internal chain-of-thought (reasoning_content) as user advice.
+        if (!msg.optString("reasoning_content", "").trim().isEmpty()) {
+            throw new IllegalStateException(context.getString(R.string.ai_err_thinking_only));
+        }
+        return "";
     }
 
     private static String formatHttpError(int status, String body) {

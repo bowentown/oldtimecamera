@@ -14,7 +14,7 @@ import static org.junit.Assert.assertTrue;
 public class AiCoachMathTest {
 
     @Test
-    public void normalizeEndpointUrl_handlesDeepSeekOpenAiQwenAndFullOverrides() {
+    public void normalizeEndpointUrl_andDeepSeekDetection_handleAllFormats() {
         assertEquals("https://api.deepseek.com/chat/completions",
                 AiCoachMath.normalizeEndpointUrl("https://api.deepseek.com"));
         assertEquals("https://api.deepseek.com/chat/completions",
@@ -27,16 +27,16 @@ public class AiCoachMathTest {
                 AiCoachMath.normalizeEndpointUrl("https://api.openai.com"));
         assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
                 AiCoachMath.normalizeEndpointUrl("https://dashscope.aliyuncs.com/compatible-mode/v1"));
-        assertEquals("https://proxy.example.com/v2/chat/completions",
-                AiCoachMath.normalizeEndpointUrl("https://proxy.example.com/v2/chat/completions"));
         assertEquals("", AiCoachMath.normalizeEndpointUrl("  "));
+
+        assertTrue(AiCoachMath.isDeepSeekEndpoint("https://api.deepseek.com/chat/completions"));
+        assertFalse(AiCoachMath.isDeepSeekEndpoint("https://api.openai.com/v1/chat/completions"));
     }
 
     @Test
     public void endpointSchemeAndKeyMasking_enforceTransportSafetyAndPrivacy() {
         assertTrue(AiCoachMath.isAllowedEndpointUrl("https://api.deepseek.com/chat/completions"));
         assertTrue(AiCoachMath.isAllowedEndpointUrl("http://localhost:11434/v1/chat/completions"));
-        assertTrue(AiCoachMath.isAllowedEndpointUrl("http://127.0.0.1:8080/v1/chat/completions"));
         assertFalse(AiCoachMath.isAllowedEndpointUrl("http://api.deepseek.com/chat/completions"));
         assertFalse(AiCoachMath.isAllowedEndpointUrl(""));
 
@@ -48,21 +48,36 @@ public class AiCoachMathTest {
     }
 
     @Test
-    public void parseCritique_stripsThinkingAndMarkdownFencesAndFallsBackToLines() {
-        String rawJson = "<think>Evaluating composition...</think>\n"
+    public void parseAdvice_parsesStructuredCoachingAndValidatesCameraSuggestions() {
+        String rawJson = "<think>internal reasoning ignored</think>\n"
                 + "```json\n"
-                + "{\"strength\":\"三分线落点清晰\",\"issue\":\"头顶\\n略紧\",\"nextAction\":\"退后一步再拍\\u2713\"}\n"
+                + "{\"diagnosis\":\"后方强光顶板干扰且低机位仰拍\","
+                + "\"action\":\"手机举至眉心微俯拍，人向左转35°避开格子墙\","
+                + "\"recommendedPresetId\":\"softbw400\","
+                + "\"evDelta\":-0.7,"
+                + "\"recommendedGrid\":\"THIRDS\"}\n"
                 + "```";
-        AiCoachMath.AiCritique c = AiCoachMath.parseCritique(rawJson, true);
-        assertEquals("三分线落点清晰", c.strength);
-        assertEquals("头顶 略紧", c.issue);
-        assertEquals("退后一步再拍✓", c.nextAction);
+        AiCoachMath.AiAdvice a = AiCoachMath.parseAdvice(rawJson, true);
+        assertEquals("后方强光顶板干扰且低机位仰拍", a.diagnosis);
+        assertEquals("手机举至眉心微俯拍，人向左转35°避开格子墙", a.action);
+        assertEquals("softbw400", a.recommendedPresetId);
+        assertEquals(-0.7f, a.evDelta, 0.01f);
+        assertEquals(CompositionMath.GridMode.THIRDS, a.recommendedGrid);
+        assertTrue(a.hasCameraTweaks("warm400", CompositionMath.GridMode.OFF));
+        assertFalse(a.hasActionablePresetChange("softbw400"));
 
-        AiCoachMath.AiCritique plain = AiCoachMath.parseCritique(
-                "1. Good side light on face\n2. Horizon tilts slightly\n3. Lower angle one step", false);
-        assertEquals("Good side light on face", plain.strength);
-        assertEquals("Horizon tilts slightly", plain.issue);
-        assertEquals("Lower angle one step", plain.nextAction);
+        // Unknown stock ID is dropped instead of switching randomly; evDelta is clamped cleanly.
+        String bogus = "{\"diagnosis\":\"逆光过暗\",\"action\":\"侧转迎光\",\"recommendedPresetId\":\"fake_stock\",\"evDelta\":9.5,\"recommendedGrid\":\"BOGUS\"}";
+        AiCoachMath.AiAdvice sanitized = AiCoachMath.parseAdvice(bogus, true);
+        assertEquals("", sanitized.recommendedPresetId);
+        assertEquals(2.0f, sanitized.evDelta, 0.01f);
+        assertNull(sanitized.recommendedGrid);
+
+        // Plain-text fallback splits cleanly into diagnosis & action without throwing.
+        AiCoachMath.AiAdvice plain = AiCoachMath.parseAdvice(
+                "1. Bright glare behind glasses\n2. Lower chin and step sideways", false);
+        assertEquals("Bright glare behind glasses", plain.diagnosis);
+        assertEquals("Lower chin and step sideways", plain.action);
     }
 
     @Test
@@ -81,49 +96,49 @@ public class AiCoachMathTest {
         assertEquals(-0.35f, p.recipe.warmth, 0.001f);
         assertTrue(p.blackMist);
 
-        // Unknown base preset ID falls back safely to fallbackPresetId instead of arbitrary default.
-        String badStock = "{\"basePresetId\":\"kodak_portra_400\",\"name\":\"Test\",\"intensity\":0.5,\"grainScale\":-1,\"warmth\":5,\"blackMist\":false}";
+        String badStock = "{\"basePresetId\":\"kodak_fake\",\"name\":\"Test\",\"intensity\":0.5,\"grainScale\":-1,\"warmth\":5,\"blackMist\":false}";
         AiCoachMath.AiRecipeProposal fallback = AiCoachMath.parseRecipeProposal(badStock, "coolcast400", false);
         assertNotNull(fallback);
         assertEquals("coolcast400", fallback.basePresetId);
         assertEquals(0.0f, fallback.recipe.grainScale, 0.001f);
         assertEquals(1.0f, fallback.recipe.warmth, 0.001f);
         assertFalse(fallback.blackMist);
-
         assertNull(AiCoachMath.parseRecipeProposal("not json at all", "warm400", false));
     }
 
     @Test
-    public void parseInspireTipAndCritiqueLog_roundTripCleanly() {
-        String tip = AiCoachMath.parseInspireTip("<think>hmm</think>\n“低机位仰拍避开杂乱地面，主体靠右三分线。”");
-        assertEquals("低机位仰拍避开杂乱地面，主体靠右三分线。", tip);
-        assertTrue(tip.length() <= 48);
-
-        Map<String, AiCoachMath.AiCritique> log = new LinkedHashMap<>();
+    public void adviceLogEncoding_roundTripsAllFields() {
+        Map<String, AiCoachMath.AiAdvice> log = new LinkedHashMap<>();
         log.put("content://media/external/images/media/101",
-                new AiCoachMath.AiCritique("光线通透", "高光微过", "降一格EV"));
-        String encoded = AiCoachMath.encodeCritiqueLog(log);
-        Map<String, AiCoachMath.AiCritique> decoded = AiCoachMath.decodeCritiqueLog(encoded);
+                new AiCoachMath.AiAdvice("背景高光略杂", "向右移一步避开灯箱", "warm400", -0.3f,
+                        CompositionMath.GridMode.THIRDS));
+        String encoded = AiCoachMath.encodeAdviceLog(log);
+        Map<String, AiCoachMath.AiAdvice> decoded = AiCoachMath.decodeAdviceLog(encoded);
         assertEquals(1, decoded.size());
-        AiCoachMath.AiCritique restored = decoded.get("content://media/external/images/media/101");
+        AiCoachMath.AiAdvice restored = decoded.get("content://media/external/images/media/101");
         assertNotNull(restored);
-        assertEquals("光线通透", restored.strength);
-        assertEquals("高光微过", restored.issue);
-        assertEquals("降一格EV", restored.nextAction);
+        assertEquals("背景高光略杂", restored.diagnosis);
+        assertEquals("向右移一步避开灯箱", restored.action);
+        assertEquals("warm400", restored.recommendedPresetId);
+        assertEquals(-0.3f, restored.evDelta, 0.01f);
+        assertEquals(CompositionMath.GridMode.THIRDS, restored.recommendedGrid);
     }
 
     @Test
-    public void promptBuilders_includeAllStocksAndTelemetrySummary() {
-        String prompt = AiCoachMath.buildRecipeSystemPrompt(true);
+    public void promptBuilders_includeAllStocksAndCameraContext() {
+        String coachSys = AiCoachMath.buildViewfinderCoachSystemPrompt(true);
+        String recipeSys = AiCoachMath.buildRecipeSystemPrompt(true);
         for (FilmPreset p : FilmPresets.all()) {
-            assertTrue("Missing preset id " + p.id, prompt.contains(p.id));
+            assertTrue("Missing preset id in coach: " + p.id, coachSys.contains(p.id));
+            assertTrue("Missing preset id in recipe: " + p.id, recipeSys.contains(p.id));
         }
         PreviewStats stats = new PreviewStats(32, 24, 0.52f, 0.04f, 0.05f, 0.50f, 0.48f,
                 0.5f, 0.5f, 0.5f, 0.25f, 0.5f, 0.5f, 0.5f);
-        String summary = AiCoachMath.buildPreviewTelemetrySummary(stats, -2.5f, "暖肤 400", "3:4", true);
-        assertTrue(summary.contains("暖肤 400"));
-        assertTrue(summary.contains("3:4"));
-        assertTrue(summary.contains("EV"));
-        assertTrue(summary.contains("Tilt:"));
+        String ctx = AiCoachMath.buildViewfinderUserContext(
+                stats, -2.5f, "warm400", "暖肤 400", -0.3f, "3:4", true, true, true);
+        assertTrue(ctx.contains("warm400"));
+        assertTrue(ctx.contains("lens=front"));
+        assertTrue(ctx.contains("needle="));
+        assertTrue(ctx.contains("tilt="));
     }
 }

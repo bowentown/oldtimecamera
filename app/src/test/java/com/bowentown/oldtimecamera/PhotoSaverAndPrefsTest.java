@@ -249,9 +249,6 @@ public class PhotoSaverAndPrefsTest {
         assertTrue(PhotoSaver.shouldPairHalfFrameSideBySide(false));
         assertEquals(false, PhotoSaver.shouldPairHalfFrameSideBySide(true));
 
-        assertArrayEquals(new int[]{2, 2}, PhotoSaver.computeQuadGridDimensions(900, 1200));
-        assertArrayEquals(new int[]{1, 4}, PhotoSaver.computeQuadGridDimensions(1600, 900));
-
         assertEquals("1/125s · f/1.8 · ISO 200",
                 PhotoSaver.formatShortExifStrings("0.008", "1.8", "200, 200"));
         assertEquals("", PhotoSaver.formatShortExifStrings(null, "bad", ""));

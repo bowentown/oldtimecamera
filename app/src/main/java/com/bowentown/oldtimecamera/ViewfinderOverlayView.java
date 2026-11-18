@@ -69,15 +69,9 @@ public final class ViewfinderOverlayView extends View {
     private final Paint ghostPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint shutterPaint = new Paint();
     private final Paint shutterFlashBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint templateSolidPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint templateDashPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint arrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint headroomPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint halfFrameBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF tmpHalfRect = new RectF();
 
-    private CompositionMath.GuideTemplate guideTemplate = CompositionMath.GuideTemplate.NONE;
-    private CompositionMath.FramingAdvice framingAdvice = CompositionMath.FramingAdvice.EMPTY;
     private Bitmap halfFrameThumb = null;
 
     public ViewfinderOverlayView(Context context, AttributeSet attrs) {
@@ -123,31 +117,6 @@ public final class ViewfinderOverlayView extends View {
         shutterFlashBorderPaint.setColor(0x99F2A65A);
         shutterFlashBorderPaint.setStyle(Paint.Style.STROKE);
         shutterFlashBorderPaint.setStrokeWidth(2f * d);
-
-        templateSolidPaint.setColor(0x6CEFE7D6);
-        templateSolidPaint.setStyle(Paint.Style.STROKE);
-        templateSolidPaint.setStrokeWidth(1.1f * d);
-        templateSolidPaint.setStrokeCap(Paint.Cap.ROUND);
-        templateSolidPaint.setStrokeJoin(Paint.Join.ROUND);
-
-        templateDashPaint.setColor(0x5AEFE7D6);
-        templateDashPaint.setStyle(Paint.Style.STROKE);
-        templateDashPaint.setStrokeWidth(1.0f * d);
-        templateDashPaint.setStrokeCap(Paint.Cap.ROUND);
-        templateDashPaint.setPathEffect(new android.graphics.DashPathEffect(
-                new float[]{5f * d, 4.5f * d}, 0f));
-
-        arrowPaint.setColor(0xCCF2A65A);
-        arrowPaint.setStyle(Paint.Style.STROKE);
-        arrowPaint.setStrokeWidth(1.4f * d);
-        arrowPaint.setStrokeCap(Paint.Cap.ROUND);
-        arrowPaint.setStrokeJoin(Paint.Join.ROUND);
-
-        headroomPaint.setColor(0xCCD25A34);
-        headroomPaint.setStyle(Paint.Style.STROKE);
-        headroomPaint.setStrokeWidth(1.25f * d);
-        headroomPaint.setPathEffect(new android.graphics.DashPathEffect(
-                new float[]{4f * d, 3.5f * d}, 0f));
 
         halfFrameBorderPaint.setColor(0xDDF2A65A);
         halfFrameBorderPaint.setStyle(Paint.Style.STROKE);
@@ -359,33 +328,6 @@ public final class ViewfinderOverlayView extends View {
         invalidate();
     }
 
-    public void setGuideTemplate(CompositionMath.GuideTemplate template) {
-        CompositionMath.GuideTemplate safe = template != null
-                ? template : CompositionMath.GuideTemplate.NONE;
-        if (this.guideTemplate != safe) {
-            this.guideTemplate = safe;
-            invalidate();
-        }
-    }
-
-    public void setFramingAdvice(CompositionMath.FramingAdvice advice) {
-        CompositionMath.FramingAdvice next = advice != null
-                ? advice : CompositionMath.FramingAdvice.EMPTY;
-        CompositionMath.FramingAdvice cur = this.framingAdvice;
-        if (cur != null && cur.hasSubject == next.hasSubject
-                && cur.locked == next.locked
-                && cur.showArrow == next.showArrow
-                && cur.headroomTight == next.headroomTight
-                && Math.abs(cur.subjectX - next.subjectX) < 0.005f
-                && Math.abs(cur.subjectY - next.subjectY) < 0.005f
-                && Math.abs(cur.targetX - next.targetX) < 0.005f
-                && Math.abs(cur.targetY - next.targetY) < 0.005f) {
-            return;
-        }
-        this.framingAdvice = next;
-        invalidate();
-    }
-
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
@@ -441,9 +383,7 @@ public final class ViewfinderOverlayView extends View {
         }
 
         float d = getResources().getDisplayMetrics().density;
-        drawTemplateOverlay(canvas);
         drawCompositionOverlay(canvas, d);
-        drawFramingAdvice(canvas, d);
 
         // Compact inset preview of frame 1/2 while composing half-frame 2/2.
         if (halfFrameThumb != null && !halfFrameThumb.isRecycled()) {
@@ -603,90 +543,6 @@ public final class ViewfinderOverlayView extends View {
             }
         }
 
-        canvas.restore();
-    }
-
-    private void drawFramingAdvice(Canvas canvas, float d) {
-        CompositionMath.FramingAdvice advice = framingAdvice;
-        if (advice == null || !advice.hasSubject) return;
-        float aw = activeRect.width();
-        float ah = activeRect.height();
-        float al = activeRect.left;
-        float at = activeRect.top;
-
-        canvas.save();
-        canvas.clipRect(activeRect);
-        if (advice.headroomTight) {
-            float headY = at + ah * 0.085f;
-            canvas.drawLine(al + 14f * d, headY, activeRect.right - 14f * d, headY, headroomPaint);
-        }
-        if (advice.showArrow) {
-            float sx = al + advice.subjectX * aw;
-            float sy = at + advice.subjectY * ah;
-            float tx = al + advice.targetX * aw;
-            float ty = at + advice.targetY * ah;
-            float vx = tx - sx;
-            float vy = ty - sy;
-            float len = (float) Math.hypot(vx, vy);
-            if (len > 14f * d) {
-                float ux = vx / len;
-                float uy = vy / len;
-                float arrowLen = Math.min(len - 8f * d, 38f * d);
-                float x1 = sx + ux * 6f * d;
-                float y1 = sy + uy * 6f * d;
-                float x2 = x1 + ux * arrowLen;
-                float y2 = y1 + uy * arrowLen;
-
-                arrowPaint.setAlpha(175);
-                canvas.drawCircle(sx, sy, 3.2f * d, arrowPaint);
-                canvas.drawLine(x1, y1, x2, y2, arrowPaint);
-                float headLen = 5.5f * d;
-                float ax1 = x2 - (ux * 0.78f - uy * 0.62f) * headLen;
-                float ay1 = y2 - (uy * 0.78f + ux * 0.62f) * headLen;
-                float ax2 = x2 - (ux * 0.78f + uy * 0.62f) * headLen;
-                float ay2 = y2 - (uy * 0.78f - ux * 0.62f) * headLen;
-                canvas.drawLine(x2, y2, ax1, ay1, arrowPaint);
-                canvas.drawLine(x2, y2, ax2, ay2, arrowPaint);
-
-                arrowPaint.setAlpha(110);
-                canvas.drawCircle(tx, ty, 6.5f * d, arrowPaint);
-            }
-        }
-        canvas.restore();
-    }
-
-    private void drawTemplateOverlay(Canvas canvas) {
-        CompositionMath.GuideShape[] shapes = CompositionMath.buildTemplateShapes(guideTemplate);
-        if (shapes.length == 0) return;
-        float aw = activeRect.width();
-        float ah = activeRect.height();
-        float al = activeRect.left;
-        float at = activeRect.top;
-
-        canvas.save();
-        canvas.clipRect(activeRect);
-        for (CompositionMath.GuideShape s : shapes) {
-            switch (s.kind) {
-                case LINE:
-                    canvas.drawLine(al + s.a * aw, at + s.b * ah,
-                            al + s.c * aw, at + s.d * ah, templateSolidPaint);
-                    break;
-                case DASHED_LINE:
-                    canvas.drawLine(al + s.a * aw, at + s.b * ah,
-                            al + s.c * aw, at + s.d * ah, templateDashPaint);
-                    break;
-                case OVAL:
-                    tmpOval.set(al + s.a * aw, at + s.b * ah,
-                            al + s.c * aw, at + s.d * ah);
-                    canvas.drawOval(tmpOval, templateSolidPaint);
-                    break;
-                case ARC:
-                    tmpOval.set(al + s.a * aw, at + s.b * ah,
-                            al + s.c * aw, at + s.d * ah);
-                    canvas.drawArc(tmpOval, s.startDeg, s.sweepDeg, false, templateSolidPaint);
-                    break;
-            }
-        }
         canvas.restore();
     }
 }

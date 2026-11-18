@@ -96,14 +96,10 @@ public class MainActivity extends ComponentActivity {
 
     private static final int REQUEST_PERMISSIONS = 1001;
     private static final int MAX_PHOTO_EDGE = 2560;
-    private static final int MAX_QUAD_EDGE = 1080;
     private static final long FACE_STALE_MS = 900L;
     private static final long TAP_SUBJECT_TTL_MS = 4000L;
     private static final long FEEDBACK_HINT_MS = 1350L;
     private static final long EXPOSURE_HINT_AUTO_FADE_MS = 4800L;
-    private static final long POST_REVIEW_MS = 4200L;
-    private static final long AI_INSPIRE_MS = 6500L;
-    private static final long QUAD_INTERVAL_MS = 380L;
     private static final long STEADY_WAIT_MAX_MS = 1500L;
     private static final long SNAP_HAPTIC_COOLDOWN_MS = 900L;
 
@@ -115,14 +111,13 @@ public class MainActivity extends ComponentActivity {
     private AspectFrameLayout previewHost;
     private FilmCameraView previewView;
     private ViewfinderOverlayView viewfinderOverlay;
-    private MeterStripView meterStrip;
     private TextView rollCounter, dateStampPreview, countdownText;
     private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
-    private TextView assistHintPill, sceneRecommendLabel, postShotReviewPill, aiInspirePill;
+    private TextView assistHintPill;
     private TextView recipePanelTitle, recipeIntensityVal, recipeGrainVal, recipeWarmthVal;
-    private TextView modePickSingle, modePickDouble, modePickHalf, modePickQuad;
-    private LinearLayout sceneRecommendChip, modePickerBar, recipePanel;
-    private ImageButton sceneRecommendClose, poseGuideButton, aiInspireButton;
+    private LinearLayout recipePanel, bottomDeck, aiCoachCard;
+    private TextView aiCoachDiag, aiCoachAction, aiCoachApplyBtn;
+    private ImageButton aiCoachButton;
     private ImageButton flashButton, gridPill, modePill;
     private ImageView timerIcon, thumbnail, thumbPlaceholder;
     private HorizontalScrollView filmStripScroll;
@@ -153,30 +148,16 @@ public class MainActivity extends ComponentActivity {
     private boolean grainBoost = false;
     private boolean lightLeakEnabled = true;
     private boolean blackMistEnabled = false;
-    private boolean shakeLeakEnabled = true;
     private CompositionMath.GridMode gridMode = CompositionMath.GridMode.OFF;
-    private CompositionMath.GuideTemplate guideTemplate = CompositionMath.GuideTemplate.NONE;
     private int goldenRotation = 0;
     private boolean levelEnabled = false;
     private boolean shutterSoundEnabled = true;
     private volatile boolean frontMirrorEnabled = true;
-    private volatile boolean assistEnabled = true;
-    private volatile boolean assistComp = true;
     private volatile boolean assistExposure = true;
-    private volatile boolean assistMeterBar = true;
-    private volatile boolean assistScene = true;
-    private volatile boolean assistStability = true;
     private volatile boolean assistSteadyShutter = true;
-    private PracticeRoll.Theme practiceTheme = null;
-    private int practiceStep = 0;
     private Bitmap doubleExposureFirstFrame = null;
     private Bitmap halfFirstFrame = null;
     private boolean halfFirstLandscape = false;
-    private final List<Bitmap> quadFrames = new ArrayList<>();
-    private final Object quadLock = new Object();
-    private final AtomicInteger quadGen = new AtomicInteger(0);
-    private byte[] quadFirstExif = null;
-    private volatile boolean quadBurstActive = false;
     private int timerSeconds = 0;
     private int rollNumber = 1;
     private int exposures = 0;
@@ -187,7 +168,6 @@ public class MainActivity extends ComponentActivity {
     private boolean permissionAsked = false;
     /** Pending front-camera screen-flash capture; removable so a backgrounded app cannot lock the shutter. */
     private Runnable pendingScreenFlashCapture = null;
-    private Runnable pendingQuadStepTask = null;
     @SuppressWarnings("unused")
     private boolean latestAxisSwapped = true;
     private CountDownTimer activeTimer;
@@ -198,19 +178,15 @@ public class MainActivity extends ComponentActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final CompositionMath.SnapState snapState = new CompositionMath.SnapState();
     private final ExposureAdvisor exposureAdvisor = new ExposureAdvisor();
-    private final SceneClassifier sceneClassifier = new SceneClassifier();
     private final StabilityMeter stabilityMeter = new StabilityMeter();
-    private final StabilityMeter.ShakeDetector shakeDetector = new StabilityMeter.ShakeDetector();
     private Sensor gyroSensor;
     private boolean stabilitySensorRegistered = false;
-    private boolean shakeSensorRegistered = false;
     private boolean steadyWaiting = false;
     private long steadyWaitStartMs = 0L;
     private volatile int previewRelativeSensorRotation = 90;
     private volatile Rect sensorActiveArray = null;
     private volatile float latestFrameScaleX = 1f, latestFrameScaleY = 1f;
     private volatile float lastFaceActiveX = Float.NaN, lastFaceActiveY = Float.NaN;
-    private volatile float lastFaceTopNorm = Float.NaN;
     private volatile long lastFaceActiveMs = 0L;
     private float lastTapSubjectX = Float.NaN, lastTapSubjectY = Float.NaN;
     private long lastTapSubjectMs = 0L;
@@ -218,7 +194,6 @@ public class MainActivity extends ComponentActivity {
     private float lastStatsSubjectX = Float.NaN, lastStatsSubjectY = Float.NaN;
     private long lastStatsSubjectMs = 0L;
     private PreviewStats latestStats = null;
-    private CompositionMath.FramingAdvice latestFramingAdvice = CompositionMath.FramingAdvice.EMPTY;
     private float latestTiltDeg = 0f;
     private String activeHintText = null;
     private boolean activeHintClickable = false;
@@ -226,11 +201,11 @@ public class MainActivity extends ComponentActivity {
     private long transientHintUntilMs = 0L;
     private ExposureAdvisor.Advice lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
     private boolean exposureHintAutoFaded = false;
-    private SceneClassifier.Recommendation activeRecommendation = null;
     private boolean syncingRecipeSliders = false;
     private String pendingAiRecipeName = "";
-    private volatile boolean aiInspireBusy = false;
-    private final AtomicInteger aiInspireGen = new AtomicInteger(0);
+    private volatile boolean aiCoachBusy = false;
+    private final AtomicInteger aiCoachGen = new AtomicInteger(0);
+    private AiCoachMath.AiAdvice pendingAiAdvice = null;
 
     // Latest CameraX transform metadata + optional user manual calibration.
     private volatile int manualRotation = -1;
@@ -264,38 +239,13 @@ public class MainActivity extends ComponentActivity {
     private final SensorEventListener stabilitySensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
-            if (!assistEnabled || (!assistStability && !assistSteadyShutter)
-                    || event.values == null || event.values.length < 3) {
+            if (!assistSteadyShutter || event.values == null || event.values.length < 3) {
                 return;
             }
-            boolean wasStable = stabilityMeter.isStable();
             if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
                 stabilityMeter.pushGyro(event.values[0], event.values[1], event.values[2], event.timestamp);
             } else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
                 stabilityMeter.pushAccelerometer(event.values[0], event.values[1], event.values[2], event.timestamp);
-            }
-            if (stabilityMeter.isStable() != wasStable) {
-                refreshAssistHint();
-            }
-        }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
-    };
-
-    private final SensorEventListener shakeSensorListener = new SensorEventListener() {
-        @Override
-        public void onSensorChanged(SensorEvent event) {
-            if (!shakeLeakEnabled || !lightLeakEnabled || !isActivityResumed
-                    || capturing || event.values == null || event.values.length < 3) {
-                return;
-            }
-            if (shakeDetector.pushAccelerometer(
-                    event.values[0], event.values[1], event.values[2], event.timestamp)) {
-                leakSeed = (leakSeed + 0.41f + (SystemClock.uptimeMillis() % 89) / 199f) % 1.0f;
-                previewView.setLeakSeed(leakSeed);
-                shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                showTransientHint(R.string.hint_leak_shuffled);
             }
         }
 
@@ -305,13 +255,9 @@ public class MainActivity extends ComponentActivity {
 
     private final Runnable clearTransientHintTask = () -> {
         transientHintRes = 0;
-        transientHintText = null;
         transientHintUntilMs = 0L;
         refreshAssistHint();
     };
-
-    private final Runnable hidePostReviewTask = this::hidePostShotReview;
-    private final Runnable hideAiInspireTask = this::hideAiInspirePill;
 
     private final Runnable autoFadeExposureTask = () -> {
         exposureHintAutoFaded = true;
@@ -325,8 +271,7 @@ public class MainActivity extends ComponentActivity {
                 return;
             }
             long elapsed = SystemClock.uptimeMillis() - steadyWaitStartMs;
-            if (stabilityMeter.isStable() || elapsed >= STEADY_WAIT_MAX_MS
-                    || !assistEnabled || !assistSteadyShutter) {
+            if (stabilityMeter.isStable() || elapsed >= STEADY_WAIT_MAX_MS || !assistSteadyShutter) {
                 cancelSteadyWait(false);
                 captureNow();
                 return;
@@ -367,14 +312,12 @@ public class MainActivity extends ComponentActivity {
         applyPresetSelection(selectedChipIndex, false);
         applyAspectRatio(false);
         updateGridUi();
-        updateGuideTemplateUi();
         updateLevelUi();
         updateModeUi();
         updateTimerUi();
         updateStampPreview();
         updateRollCounter();
         syncAssistSensorsAndTelemetry();
-        syncShakeSensorRegistration();
         refreshThumbnailAsync();
         ensurePermissions();
     }
@@ -392,22 +335,13 @@ public class MainActivity extends ComponentActivity {
         grainBoost = prefs.isGrainBoost();
         lightLeakEnabled = prefs.isLightLeakEnabled();
         blackMistEnabled = prefs.isBlackMistEnabled();
-        shakeLeakEnabled = prefs.isShakeLeakEnabled();
         gridMode = prefs.getGridMode();
-        guideTemplate = prefs.getGuideTemplate();
         goldenRotation = prefs.getGoldenRotation();
         levelEnabled = prefs.isLevelEnabled();
         shutterSoundEnabled = prefs.isShutterSoundEnabled();
         frontMirrorEnabled = prefs.isFrontMirrorEnabled();
-        assistEnabled = prefs.isAssistEnabled();
-        assistComp = prefs.isAssistComposition();
         assistExposure = prefs.isAssistExposure();
-        assistMeterBar = prefs.isAssistMeterBar();
-        assistScene = prefs.isAssistScene();
-        assistStability = prefs.isAssistStability();
         assistSteadyShutter = prefs.isAssistSteadyShutter();
-        practiceTheme = prefs.getPracticeTheme();
-        practiceStep = prefs.getPracticeStep();
         timerSeconds = prefs.getTimerSeconds();
         manualRotation = prefs.getManualRotation();
         rollNumber = prefs.getRollNumber();
@@ -435,18 +369,16 @@ public class MainActivity extends ComponentActivity {
         previewHost = findViewById(R.id.previewHost);
         previewView = findViewById(R.id.preview);
         viewfinderOverlay = findViewById(R.id.viewfinderOverlay);
-        meterStrip = findViewById(R.id.meterStrip);
-        poseGuideButton = findViewById(R.id.poseGuideButton);
-        aiInspireButton = findViewById(R.id.aiInspireButton);
+        aiCoachButton = findViewById(R.id.aiCoachButton);
+        bottomDeck = findViewById(R.id.bottomDeck);
+        aiCoachCard = findViewById(R.id.aiCoachCard);
+        aiCoachDiag = findViewById(R.id.aiCoachDiag);
+        aiCoachAction = findViewById(R.id.aiCoachAction);
+        aiCoachApplyBtn = findViewById(R.id.aiCoachApplyBtn);
         rollCounter = findViewById(R.id.rollCounter);
         dateStampPreview = findViewById(R.id.dateStamp);
         countdownText = findViewById(R.id.countdownText);
         assistHintPill = findViewById(R.id.assistHintPill);
-        postShotReviewPill = findViewById(R.id.postShotReviewPill);
-        aiInspirePill = findViewById(R.id.aiInspirePill);
-        sceneRecommendChip = findViewById(R.id.sceneRecommendChip);
-        sceneRecommendLabel = findViewById(R.id.sceneRecommendLabel);
-        sceneRecommendClose = findViewById(R.id.sceneRecommendClose);
         flashButton = findViewById(R.id.flashButton);
         timerIcon = findViewById(R.id.timerIcon);
         timerLabel = findViewById(R.id.timerLabel);
@@ -458,11 +390,6 @@ public class MainActivity extends ComponentActivity {
         evValueText = findViewById(R.id.evValueText);
         gridPill = findViewById(R.id.gridPill);
         modePill = findViewById(R.id.modePill);
-        modePickerBar = findViewById(R.id.modePickerBar);
-        modePickSingle = findViewById(R.id.modePickSingle);
-        modePickDouble = findViewById(R.id.modePickDouble);
-        modePickHalf = findViewById(R.id.modePickHalf);
-        modePickQuad = findViewById(R.id.modePickQuad);
         recipePanel = findViewById(R.id.recipePanel);
         recipePanelTitle = findViewById(R.id.recipePanelTitle);
         recipeIntensitySeek = findViewById(R.id.recipeIntensitySeek);
@@ -514,25 +441,10 @@ public class MainActivity extends ComponentActivity {
             applyAspectRatio(true);
         });
 
-        poseGuideButton.setOnClickListener(v -> {
-            guideTemplate = guideTemplate.next();
-            prefs.setGuideTemplate(guideTemplate);
-            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-            updateGuideTemplateUi();
-            showTransientHint(poseTemplateLabelRes(guideTemplate));
-        });
-
-        aiInspireButton.setOnClickListener(v -> triggerAiInspire());
-        aiInspirePill.setOnClickListener(v -> hideAiInspirePill());
-
-        meterStrip.setOnClickListener(v -> {
-            boolean show = evPanel.getVisibility() != View.VISIBLE;
-            closeBottomDrawers(show ? evPanel : null);
-            evPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-            updateSceneChipUi();
-        });
-
-        postShotReviewPill.setOnClickListener(v -> hidePostShotReview());
+        aiCoachButton.setOnClickListener(v -> triggerAiCoach());
+        findViewById(R.id.aiCoachRefreshBtn).setOnClickListener(v -> triggerAiCoach());
+        findViewById(R.id.aiCoachCloseBtn).setOnClickListener(v -> hideAiCoachCard());
+        aiCoachApplyBtn.setOnClickListener(v -> applyPendingAiAdvice());
 
         dateStampPreview.setOnClickListener(v -> {
             dateMode = (dateMode == CameraPrefs.DateMode.TODAY)
@@ -556,7 +468,6 @@ public class MainActivity extends ComponentActivity {
             boolean show = evPanel.getVisibility() != View.VISIBLE;
             closeBottomDrawers(show ? evPanel : null);
             evPanel.setVisibility(show ? View.VISIBLE : View.GONE);
-            updateSceneChipUi();
         });
 
         gridPill.setOnClickListener(v -> {
@@ -590,48 +501,7 @@ public class MainActivity extends ComponentActivity {
         });
 
         assistHintPill.setOnClickListener(v -> applyExposureHint());
-
-        sceneRecommendChip.setOnClickListener(v -> {
-            SceneClassifier.Recommendation rec = activeRecommendation;
-            if (rec == null) return;
-            int idx = FilmPresets.indexOfId(rec.presetId);
-            if (idx >= 0) {
-                shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                applyPresetSelection(idx, true);
-            }
-        });
-
-        sceneRecommendClose.setOnClickListener(v -> {
-            SceneClassifier.Recommendation rec = activeRecommendation;
-            if (rec != null) {
-                sceneClassifier.dismiss(rec.scene);
-                activeRecommendation = null;
-                updateSceneChipUi();
-            }
-        });
-
-        modePill.setOnClickListener(v -> {
-            if (modePickerBar.getVisibility() == View.VISIBLE) {
-                modePickerBar.setVisibility(View.GONE);
-                updateSceneChipUi();
-                return;
-            }
-            cycleShootMode();
-        });
-        modePill.setOnLongClickListener(v -> {
-            boolean show = modePickerBar.getVisibility() != View.VISIBLE;
-            closeBottomDrawers(show ? modePickerBar : null);
-            modePickerBar.setVisibility(show ? View.VISIBLE : View.GONE);
-            updateModePickerHighlights();
-            updateSceneChipUi();
-            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            return true;
-        });
-
-        modePickSingle.setOnClickListener(v -> selectShootMode(CameraPrefs.ShootMode.SINGLE));
-        modePickDouble.setOnClickListener(v -> selectShootMode(CameraPrefs.ShootMode.DOUBLE_EXP));
-        modePickHalf.setOnClickListener(v -> selectShootMode(CameraPrefs.ShootMode.HALF_FRAME));
-        modePickQuad.setOnClickListener(v -> selectShootMode(CameraPrefs.ShootMode.QUAD_STRIP));
+        modePill.setOnClickListener(v -> cycleShootMode());
 
         wireRecipeSliders();
 
@@ -661,15 +531,10 @@ public class MainActivity extends ComponentActivity {
             lp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
             dateStampPreview.setLayoutParams(lp);
 
-            FrameLayout.LayoutParams plp = (FrameLayout.LayoutParams) poseGuideButton.getLayoutParams();
-            plp.leftMargin = Math.max(0, Math.round(rect.left)) + FilmUiHelper.dp(this, 8);
-            plp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
-            poseGuideButton.setLayoutParams(plp);
-
-            FrameLayout.LayoutParams ilp = (FrameLayout.LayoutParams) aiInspireButton.getLayoutParams();
-            ilp.leftMargin = Math.max(0, Math.round(rect.left)) + FilmUiHelper.dp(this, 44);
+            FrameLayout.LayoutParams ilp = (FrameLayout.LayoutParams) aiCoachButton.getLayoutParams();
+            ilp.leftMargin = Math.max(0, Math.round(rect.left)) + FilmUiHelper.dp(this, 8);
             ilp.bottomMargin = Math.max(0, Math.round(vh - rect.bottom)) + FilmUiHelper.dp(this, 8);
-            aiInspireButton.setLayoutParams(ilp);
+            aiCoachButton.setLayoutParams(ilp);
         });
 
         previewView.setOnAxisSwapListener(swapped -> updateViewfinderAspectRatio(swapped, false));
@@ -683,6 +548,7 @@ public class MainActivity extends ComponentActivity {
             @Override
             public void onTapFocus(float viewX, float viewY, int viewWidth, int viewHeight) {
                 closeBottomDrawers(null);
+                hideAiCoachCard();
                 triggerTapFocus(viewX, viewY, viewWidth, viewHeight);
             }
 
@@ -805,11 +671,6 @@ public class MainActivity extends ComponentActivity {
         if (recipePanel.getVisibility() == View.VISIBLE) {
             syncRecipeSlidersFromState();
         }
-
-        if (activeRecommendation != null && base.id.equals(activeRecommendation.presetId)) {
-            activeRecommendation = null;
-            updateSceneChipUi();
-        }
     }
 
     private FilmPreset resolveEffectivePreset() {
@@ -868,7 +729,6 @@ public class MainActivity extends ComponentActivity {
         closeBottomDrawers(recipePanel);
         syncRecipeSlidersFromState();
         recipePanel.setVisibility(View.VISIBLE);
-        updateSceneChipUi();
         shutterButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
     }
 
@@ -921,7 +781,6 @@ public class MainActivity extends ComponentActivity {
                     FilmUiHelper.updateChipSelection(this, chips, selectedChipIndex);
                     FilmUiHelper.centerChip(filmStripScroll, chips.get(selectedChipIndex));
                     recipePanel.setVisibility(View.GONE);
-                    updateSceneChipUi();
                     Toast.makeText(this, getString(R.string.recipe_saved, name), Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton(R.string.cancel, null)
@@ -987,14 +846,9 @@ public class MainActivity extends ComponentActivity {
         if (recipePanel != except && recipePanel.getVisibility() == View.VISIBLE) {
             recipePanel.setVisibility(View.GONE);
         }
-        if (modePickerBar != except && modePickerBar.getVisibility() == View.VISIBLE) {
-            modePickerBar.setVisibility(View.GONE);
-        }
         if (except != null) {
-            hidePostShotReview();
-            hideAiInspirePill();
+            hideAiCoachCard();
         }
-        updateSceneChipUi();
     }
 
     private void updateViewfinderAspectRatio(boolean axisSwapped, boolean animate) {
@@ -1046,25 +900,6 @@ public class MainActivity extends ComponentActivity {
         gridPill.setColorFilter(getColor(active ? R.color.amber_led : R.color.paper));
     }
 
-    private void updateGuideTemplateUi() {
-        viewfinderOverlay.setGuideTemplate(guideTemplate);
-        boolean active = guideTemplate != CompositionMath.GuideTemplate.NONE;
-        poseGuideButton.setColorFilter(getColor(active ? R.color.amber_led : R.color.paper));
-        poseGuideButton.setAlpha(active ? 1f : 0.78f);
-    }
-
-    private static int poseTemplateLabelRes(CompositionMath.GuideTemplate t) {
-        switch (t) {
-            case PORTRAIT_THIRDS: return R.string.pose_portrait;
-            case BACK_SILHOUETTE: return R.string.pose_back;
-            case LOW_ANGLE: return R.string.pose_low;
-            case SYMMETRY: return R.string.pose_symmetry;
-            case OVERHEAD_STILL: return R.string.pose_overhead;
-            case GOLDEN_DIAGONAL: return R.string.pose_diagonal;
-            default: return R.string.pose_none;
-        }
-    }
-
     private void updateLevelUi() {
         viewfinderOverlay.setLevelEnabled(levelEnabled);
         syncLevelSensorRegistration();
@@ -1079,56 +914,28 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private void syncShakeSensorRegistration() {
-        if (sensorManager == null || accelerometer == null) return;
-        sensorManager.unregisterListener(shakeSensorListener);
-        shakeSensorRegistered = false;
-        if (isActivityResumed && shakeLeakEnabled && lightLeakEnabled) {
-            shakeSensorRegistered = sensorManager.registerListener(
-                    shakeSensorListener, accelerometer, SensorManager.SENSOR_DELAY_UI);
-        }
-        if (!shakeSensorRegistered) {
-            shakeDetector.reset();
-        }
-    }
-
     private void syncAssistSensorsAndTelemetry() {
-        boolean showMeter = assistEnabled && assistMeterBar;
-        meterStrip.setVisibility(showMeter ? View.VISIBLE : View.GONE);
-
-        boolean needTelemetry = assistEnabled
-                && (assistExposure || assistScene || assistComp || assistMeterBar || practiceTheme != null);
+        boolean needTelemetry = assistExposure || gridMode != CompositionMath.GridMode.OFF;
         previewView.setTelemetryEnabled(needTelemetry);
 
-        if (!assistEnabled || !assistExposure) {
+        if (!assistExposure) {
             exposureAdvisor.reset();
             lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
             exposureHintAutoFaded = false;
             mainHandler.removeCallbacks(autoFadeExposureTask);
         }
-        if (!assistEnabled || !assistScene) {
-            activeRecommendation = null;
-            updateSceneChipUi();
-        }
-        if (!assistEnabled || !assistComp) {
-            snapState.reset();
-            latestFramingAdvice = CompositionMath.FramingAdvice.EMPTY;
-            viewfinderOverlay.setPowerPointHighlight(-1);
-            viewfinderOverlay.setFramingAdvice(CompositionMath.FramingAdvice.EMPTY);
-        } else if (gridMode == CompositionMath.GridMode.OFF) {
+        if (gridMode == CompositionMath.GridMode.OFF) {
             snapState.reset();
             viewfinderOverlay.setPowerPointHighlight(-1);
         }
-        if (!isActivityResumed || !assistEnabled || !assistSteadyShutter) {
+        if (!isActivityResumed || !assistSteadyShutter) {
             cancelSteadyWait(false);
         }
 
         if (sensorManager != null) {
             sensorManager.unregisterListener(stabilitySensorListener);
             stabilitySensorRegistered = false;
-            boolean needStability = isActivityResumed && assistEnabled
-                    && (assistStability || assistSteadyShutter || practiceTheme != null);
-            if (needStability) {
+            if (isActivityResumed && assistSteadyShutter) {
                 if (gyroSensor != null) {
                     stabilitySensorRegistered = sensorManager.registerListener(
                             stabilitySensorListener, gyroSensor, SensorManager.SENSOR_DELAY_GAME);
@@ -1181,16 +988,13 @@ public class MainActivity extends ComponentActivity {
             return;
         }
         latestStats = stats;
-        if (assistEnabled && assistMeterBar && meterStrip != null) {
-            meterStrip.updateTelemetry(stats);
-        }
 
         long now = SystemClock.uptimeMillis();
         lastStatsSubjectX = stats.saliencyConfidence >= 0.22f ? stats.saliencyX : Float.NaN;
         lastStatsSubjectY = stats.saliencyConfidence >= 0.22f ? stats.saliencyY : Float.NaN;
         lastStatsSubjectMs = stats.saliencyConfidence >= 0.22f ? now : 0L;
 
-        if (assistEnabled && assistExposure) {
+        if (assistExposure) {
             exposureAdvisor.evaluate(stats, now);
             ExposureAdvisor.Advice advice = effectiveExposureAdvice();
             if (advice != lastShownExposureAdvice) {
@@ -1208,15 +1012,8 @@ public class MainActivity extends ComponentActivity {
             mainHandler.removeCallbacks(autoFadeExposureTask);
         }
 
-        boolean freshFace = (now - lastFaceActiveMs) <= FACE_STALE_MS && !Float.isNaN(lastFaceActiveX);
-        if (assistEnabled && assistScene) {
-            activeRecommendation = sceneClassifier.evaluate(stats, freshFace, presets[currentPreset].id);
-        } else {
-            activeRecommendation = null;
-        }
-        updateSceneChipUi();
-
-        if (assistEnabled && assistComp) {
+        if (gridMode != CompositionMath.GridMode.OFF) {
+            boolean freshFace = (now - lastFaceActiveMs) <= FACE_STALE_MS && !Float.isNaN(lastFaceActiveX);
             float subX = Float.NaN;
             float subY = Float.NaN;
             if (freshFace) {
@@ -1229,8 +1026,7 @@ public class MainActivity extends ComponentActivity {
                 subX = stats.saliencyX;
                 subY = stats.saliencyY;
             }
-
-            if (gridMode != CompositionMath.GridMode.OFF && !Float.isNaN(subX) && !Float.isNaN(subY)) {
+            if (!Float.isNaN(subX) && !Float.isNaN(subY)) {
                 float[][] pts = CompositionMath.powerPoints(gridMode, goldenRotation);
                 boolean haptic = snapState.update(subX, subY, pts, now, SNAP_HAPTIC_COOLDOWN_MS);
                 viewfinderOverlay.setPowerPointHighlight(snapState.getLockedPointIndex());
@@ -1241,16 +1037,9 @@ public class MainActivity extends ComponentActivity {
                 snapState.reset();
                 viewfinderOverlay.setPowerPointHighlight(-1);
             }
-
-            latestFramingAdvice = CompositionMath.evaluateFraming(
-                    subX, subY, freshFace, lastFaceTopNorm,
-                    gridMode, goldenRotation, snapState.getLockedPointIndex());
-            viewfinderOverlay.setFramingAdvice(latestFramingAdvice);
         } else {
             snapState.reset();
-            latestFramingAdvice = CompositionMath.FramingAdvice.EMPTY;
             viewfinderOverlay.setPowerPointHighlight(-1);
-            viewfinderOverlay.setFramingAdvice(CompositionMath.FramingAdvice.EMPTY);
         }
 
         refreshAssistHint();
@@ -1286,28 +1075,17 @@ public class MainActivity extends ComponentActivity {
         } else if (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null && !capturing) {
             nextText = getString(R.string.hint_half_first);
         } else if (activeTimer == null && !capturing
-                && permissionGate.getVisibility() != View.VISIBLE) {
-            if (assistEnabled && assistStability && stabilitySensorRegistered
-                    && stabilityMeter.isReady() && !stabilityMeter.isStable()) {
-                nextText = getString(R.string.hint_shake);
-            } else if (assistEnabled && assistComp
-                    && latestFramingAdvice != null && latestFramingAdvice.headroomTight) {
-                nextText = getString(R.string.hint_headroom_tight);
-            } else if (assistEnabled && assistExposure && !exposureHintAutoFaded) {
-                ExposureAdvisor.Advice advice = effectiveExposureAdvice();
-                if (advice == ExposureAdvisor.Advice.OVEREXPOSED) {
-                    nextText = getString(R.string.hint_overexposed);
-                } else if (advice == ExposureAdvisor.Advice.UNDEREXPOSED) {
-                    nextText = getString(R.string.hint_underexposed);
-                } else if (advice == ExposureAdvisor.Advice.BACKLIT) {
-                    nextText = getString(R.string.hint_backlit);
-                }
-                clickable = nextText != null;
+                && permissionGate.getVisibility() != View.VISIBLE
+                && assistExposure && !exposureHintAutoFaded) {
+            ExposureAdvisor.Advice advice = effectiveExposureAdvice();
+            if (advice == ExposureAdvisor.Advice.OVEREXPOSED) {
+                nextText = getString(R.string.hint_overexposed);
+            } else if (advice == ExposureAdvisor.Advice.UNDEREXPOSED) {
+                nextText = getString(R.string.hint_underexposed);
+            } else if (advice == ExposureAdvisor.Advice.BACKLIT) {
+                nextText = getString(R.string.hint_backlit);
             }
-            if (nextText == null && practiceTheme != null) {
-                nextText = PracticeRoll.stepSpec(practiceTheme, practiceStep)
-                        .coach(isChineseLocale());
-            }
+            clickable = nextText != null;
         }
 
         if (nextText == null) {
@@ -1342,105 +1120,41 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private void updateSceneChipUi() {
-        if (sceneRecommendChip == null) return;
-        boolean drawerOpen = evPanel.getVisibility() == View.VISIBLE
-                || recipePanel.getVisibility() == View.VISIBLE
-                || modePickerBar.getVisibility() == View.VISIBLE
-                || postShotReviewPill.getVisibility() == View.VISIBLE
-                || aiInspirePill.getVisibility() == View.VISIBLE;
-        boolean shouldShow = assistEnabled && assistScene
-                && activeRecommendation != null
-                && !drawerOpen
-                && !steadyWaiting
-                && activeTimer == null
-                && permissionGate.getVisibility() != View.VISIBLE;
-        if (!shouldShow) {
-            if (sceneRecommendChip.getVisibility() == View.VISIBLE) {
-                sceneRecommendChip.animate().cancel();
-                sceneRecommendChip.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
-                    if (activeRecommendation == null || evPanel.getVisibility() == View.VISIBLE
-                            || recipePanel.getVisibility() == View.VISIBLE
-                            || modePickerBar.getVisibility() == View.VISIBLE
-                            || postShotReviewPill.getVisibility() == View.VISIBLE
-                            || aiInspirePill.getVisibility() == View.VISIBLE
-                            || !assistEnabled || !assistScene) {
-                        sceneRecommendChip.setVisibility(View.GONE);
-                    }
-                }).start();
-            }
-            return;
-        }
-        String label = getString(R.string.scene_try_format, activeRecommendation.shortLabel);
-        if (!label.equals(sceneRecommendLabel.getText().toString())) {
-            sceneRecommendLabel.setText(label);
-        }
-        if (sceneRecommendChip.getVisibility() != View.VISIBLE || sceneRecommendChip.getAlpha() < 0.99f) {
-            sceneRecommendChip.animate().cancel();
-            sceneRecommendChip.setVisibility(View.VISIBLE);
-            sceneRecommendChip.animate().alpha(1f).setDuration(180L).start();
-        }
-    }
-
-    private void showPostShotReview(PracticeRoll.ShotDiagnostic diag) {
-        if (postShotReviewPill == null || diag == null || !assistEnabled) return;
-        if (evPanel.getVisibility() == View.VISIBLE || recipePanel.getVisibility() == View.VISIBLE
-                || modePickerBar.getVisibility() == View.VISIBLE) {
-            return;
-        }
-        mainHandler.removeCallbacks(hidePostReviewTask);
-        hideAiInspirePill();
-        postShotReviewPill.setText(diag.singleLine());
-        postShotReviewPill.setTextColor(getColor(
-                diag.missionPassed && practiceTheme != null ? R.color.amber_led : R.color.paper));
-        postShotReviewPill.animate().cancel();
-        postShotReviewPill.setVisibility(View.VISIBLE);
-        postShotReviewPill.animate().alpha(1f).setDuration(180L).start();
-        updateSceneChipUi();
-        mainHandler.postDelayed(hidePostReviewTask, POST_REVIEW_MS);
-    }
-
-    private void hidePostShotReview() {
-        mainHandler.removeCallbacks(hidePostReviewTask);
-        if (postShotReviewPill == null || postShotReviewPill.getVisibility() != View.VISIBLE) return;
-        postShotReviewPill.animate().cancel();
-        postShotReviewPill.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
-            postShotReviewPill.setVisibility(View.GONE);
-            updateSceneChipUi();
-        }).start();
-    }
-
-    private void triggerAiInspire() {
-        if (aiInspireBusy) return;
+    private void triggerAiCoach() {
+        if (aiCoachBusy) return;
         if (!AiKeyStore.hasApiKey(this)) {
-            AiSettingsDialog.show(this, prefs, this::triggerAiInspire);
+            AiSettingsDialog.show(this, prefs, this::triggerAiCoach);
             return;
         }
         closeBottomDrawers(null);
-        hidePostShotReview();
-        aiInspireBusy = true;
-        final int gen = aiInspireGen.incrementAndGet();
-        aiInspireButton.setAlpha(0.45f);
-        showAiInspirePill(getString(R.string.ai_inspire_thinking), false);
+        aiCoachBusy = true;
+        final int gen = aiCoachGen.incrementAndGet();
+        aiCoachButton.setAlpha(0.45f);
+        showAiCoachThinking();
 
         final PreviewStats statsSnapshot = latestStats;
         final float tiltSnapshot = latestTiltDeg;
+        final String presetId = presets[currentPreset].id;
         final String presetName = presets[currentPreset].name;
+        final float currentEvStops = (camera != null && evMax > evMin)
+                ? camera.getCameraInfo().getExposureState().getExposureCompensationIndex() * evStep
+                : 0f;
         final String aspectLabel = aspectRatio.label;
+        final boolean frontSnapshot = facingFront;
         final boolean zh = isChineseLocale();
         final boolean wantVision = prefs.isAiVisionEnabled();
 
         new Thread(() -> {
             Bitmap snapshot = null;
-            String tip = null;
+            AiCoachMath.AiAdvice advice = null;
             String err = null;
             try {
                 if (wantVision) {
-                    snapshot = previewView.capturePreviewSnapshot(512);
+                    snapshot = previewView.capturePreviewSnapshot(640);
                 }
-                tip = AiCoachClient.inspireViewfinder(
+                advice = AiCoachClient.adviseViewfinder(
                         this, prefs, snapshot, statsSnapshot, tiltSnapshot,
-                        presetName, aspectLabel, zh);
+                        presetId, presetName, currentEvStops, aspectLabel, frontSnapshot, zh);
             } catch (Exception e) {
                 err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             } finally {
@@ -1448,53 +1162,130 @@ public class MainActivity extends ComponentActivity {
                     snapshot.recycle();
                 }
             }
-            final String finalTip = tip;
+            final AiCoachMath.AiAdvice finalAdvice = advice;
             final String finalErr = err;
             runOnUiThread(() -> {
-                aiInspireBusy = false;
-                aiInspireButton.setAlpha(0.82f);
-                if (!isActivityResumed || isDestroyed() || isFinishing() || gen != aiInspireGen.get()) {
+                aiCoachBusy = false;
+                aiCoachButton.setAlpha(0.82f);
+                if (!isActivityResumed || isDestroyed() || isFinishing() || gen != aiCoachGen.get()) {
                     return;
                 }
-                if (finalTip != null && !finalTip.isEmpty()) {
+                if (finalAdvice != null && !finalAdvice.isEmpty()) {
                     shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                    showAiInspirePill(finalTip, true);
+                    showAiCoachCard(finalAdvice);
                 } else {
-                    hideAiInspirePill();
+                    hideAiCoachCard();
                     Toast.makeText(this,
-                            getString(R.string.ai_inspire_failed, String.valueOf(finalErr)),
+                            getString(R.string.ai_coach_failed, String.valueOf(finalErr)),
                             Toast.LENGTH_LONG).show();
                 }
             });
-        }, "otc-ai-inspire").start();
+        }, "otc-ai-coach").start();
     }
 
-    private void showAiInspirePill(String text, boolean autoFade) {
-        if (aiInspirePill == null || text == null || text.isEmpty()) return;
-        if (evPanel.getVisibility() == View.VISIBLE || recipePanel.getVisibility() == View.VISIBLE
-                || modePickerBar.getVisibility() == View.VISIBLE) {
-            return;
+    private void showAiCoachThinking() {
+        if (aiCoachCard == null || bottomDeck == null) return;
+        pendingAiAdvice = null;
+        bottomDeck.setVisibility(View.INVISIBLE);
+        aiCoachCard.setVisibility(View.VISIBLE);
+        aiCoachDiag.setText(R.string.ai_coach_thinking);
+        aiCoachDiag.setTextColor(getColor(R.color.paper_dim));
+        aiCoachDiag.setVisibility(View.VISIBLE);
+        aiCoachAction.setVisibility(View.GONE);
+        aiCoachApplyBtn.setVisibility(View.GONE);
+    }
+
+    private void showAiCoachCard(AiCoachMath.AiAdvice advice) {
+        if (aiCoachCard == null || bottomDeck == null || advice == null || advice.isEmpty()) return;
+        pendingAiAdvice = advice;
+        bottomDeck.setVisibility(View.INVISIBLE);
+        aiCoachCard.setVisibility(View.VISIBLE);
+
+        if (!advice.diagnosis.isEmpty()) {
+            aiCoachDiag.setText(getString(R.string.ai_coach_diag_label) + " · " + advice.diagnosis);
+            aiCoachDiag.setTextColor(getColor(R.color.paper));
+            aiCoachDiag.setVisibility(View.VISIBLE);
+        } else {
+            aiCoachDiag.setVisibility(View.GONE);
         }
-        mainHandler.removeCallbacks(hideAiInspireTask);
-        aiInspirePill.setText(text);
-        aiInspirePill.setTextColor(getColor(autoFade ? R.color.amber_led : R.color.paper_soft));
-        aiInspirePill.animate().cancel();
-        aiInspirePill.setVisibility(View.VISIBLE);
-        aiInspirePill.animate().alpha(1f).setDuration(180L).start();
-        updateSceneChipUi();
-        if (autoFade) {
-            mainHandler.postDelayed(hideAiInspireTask, AI_INSPIRE_MS);
+
+        if (!advice.action.isEmpty()) {
+            aiCoachAction.setText(getString(R.string.ai_coach_act_label) + " · " + advice.action);
+            aiCoachAction.setVisibility(View.VISIBLE);
+        } else {
+            aiCoachAction.setVisibility(View.GONE);
+        }
+
+        List<String> tweaks = new ArrayList<>(3);
+        if (advice.hasActionablePresetChange(presets[currentPreset].id)) {
+            int idx = FilmPresets.indexOfId(advice.recommendedPresetId);
+            tweaks.add(presets[idx].name);
+        }
+        if (Math.abs(advice.evDelta) >= 0.25f && evMax > evMin && camera != null) {
+            tweaks.add(String.format(Locale.US, "EV %+.1f", advice.evDelta));
+        }
+        if (advice.hasActionableGridChange(gridMode)) {
+            tweaks.add(gridShortLabel(advice.recommendedGrid));
+        }
+        if (!tweaks.isEmpty()) {
+            aiCoachApplyBtn.setText(getString(R.string.ai_coach_apply_btn, String.join(" · ", tweaks)));
+            aiCoachApplyBtn.setVisibility(View.VISIBLE);
+        } else {
+            aiCoachApplyBtn.setVisibility(View.GONE);
         }
     }
 
-    private void hideAiInspirePill() {
-        mainHandler.removeCallbacks(hideAiInspireTask);
-        if (aiInspirePill == null || aiInspirePill.getVisibility() != View.VISIBLE) return;
-        aiInspirePill.animate().cancel();
-        aiInspirePill.animate().alpha(0f).setDuration(160L).withEndAction(() -> {
-            aiInspirePill.setVisibility(View.GONE);
-            updateSceneChipUi();
-        }).start();
+    private void hideAiCoachCard() {
+        pendingAiAdvice = null;
+        if (aiCoachCard != null) aiCoachCard.setVisibility(View.GONE);
+        if (bottomDeck != null) bottomDeck.setVisibility(View.VISIBLE);
+    }
+
+    private void applyPendingAiAdvice() {
+        AiCoachMath.AiAdvice advice = pendingAiAdvice;
+        if (advice == null || capturing) return;
+
+        if (advice.hasActionablePresetChange(presets[currentPreset].id)) {
+            applyPresetSelection(FilmPresets.indexOfId(advice.recommendedPresetId), true);
+        }
+        if (Math.abs(advice.evDelta) >= 0.25f && evMax > evMin && camera != null) {
+            int curIdx = camera.getCameraInfo().getExposureState().getExposureCompensationIndex();
+            int deltaSteps = Math.round(advice.evDelta / Math.max(0.1f, evStep));
+            if (deltaSteps == 0) {
+                deltaSteps = advice.evDelta > 0f ? 1 : -1;
+            }
+            int nextIdx = Math.max(evMin, Math.min(evMax, curIdx + deltaSteps));
+            if (nextIdx != curIdx) {
+                camera.getCameraControl().setExposureCompensationIndex(nextIdx);
+                evSeekBar.setProgress(nextIdx - evMin);
+                updateEvUi(nextIdx);
+                exposureAdvisor.onHintApplied(SystemClock.uptimeMillis());
+                lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
+                exposureHintAutoFaded = false;
+                mainHandler.removeCallbacks(autoFadeExposureTask);
+            }
+        }
+        if (advice.hasActionableGridChange(gridMode)) {
+            gridMode = advice.recommendedGrid;
+            prefs.setGridMode(gridMode);
+            snapState.reset();
+            viewfinderOverlay.setPowerPointHighlight(-1);
+            updateGridUi();
+            syncAssistSensorsAndTelemetry();
+        }
+        shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        hideAiCoachCard();
+        toast(R.string.ai_coach_applied);
+    }
+
+    private String gridShortLabel(CompositionMath.GridMode mode) {
+        boolean zh = isChineseLocale();
+        switch (mode) {
+            case THIRDS: return zh ? "三分线" : "Thirds";
+            case GOLDEN_SPIRAL: return zh ? "螺旋线" : "Golden";
+            case CROSSHAIR: return zh ? "十字线" : "Cross";
+            default: return "";
+        }
     }
 
     private void applyExposureHint() {
@@ -1546,9 +1337,6 @@ public class MainActivity extends ComponentActivity {
             case HALF_FRAME:
                 modePill.setImageResource(R.drawable.ic_mode_half);
                 break;
-            case QUAD_STRIP:
-                modePill.setImageResource(R.drawable.ic_mode_quad);
-                break;
             default:
                 modePill.setImageResource(R.drawable.ic_mode_single);
                 break;
@@ -1556,18 +1344,8 @@ public class MainActivity extends ComponentActivity {
         boolean activeMode = shootMode != CameraPrefs.ShootMode.SINGLE;
         modePill.setColorFilter(getColor(activeMode ? R.color.amber_led : R.color.paper));
         modePill.setAlpha(activeMode ? 1f : 0.78f);
-        updateModePickerHighlights();
         updateRollCounter();
         refreshAssistHint();
-    }
-
-    private void updateModePickerHighlights() {
-        int paper = getColor(R.color.paper);
-        int amber = getColor(R.color.amber_led);
-        modePickSingle.setTextColor(shootMode == CameraPrefs.ShootMode.SINGLE ? amber : paper);
-        modePickDouble.setTextColor(shootMode == CameraPrefs.ShootMode.DOUBLE_EXP ? amber : paper);
-        modePickHalf.setTextColor(shootMode == CameraPrefs.ShootMode.HALF_FRAME ? amber : paper);
-        modePickQuad.setTextColor(shootMode == CameraPrefs.ShootMode.QUAD_STRIP ? amber : paper);
     }
 
     private void cycleShootMode() {
@@ -1577,30 +1355,17 @@ public class MainActivity extends ComponentActivity {
         }
         if (doubleExposureFirstFrame != null || halfFirstFrame != null) {
             clearPendingMultiFrame();
-            selectShootMode(CameraPrefs.ShootMode.SINGLE);
-            return;
-        }
-        selectShootMode(shootMode.next());
-    }
-
-    private void selectShootMode(CameraPrefs.ShootMode next) {
-        if (capturing) {
-            toast(R.string.capture_busy);
-            return;
-        }
-        if (shootMode != next) {
+            shootMode = CameraPrefs.ShootMode.SINGLE;
+        } else {
             clearPendingMultiFrame();
-            shootMode = next;
-            prefs.setShootMode(shootMode);
+            shootMode = shootMode.next();
         }
-        modePickerBar.setVisibility(View.GONE);
+        prefs.setShootMode(shootMode);
         shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
         updateModeUi();
-        updateSceneChipUi();
         switch (shootMode) {
             case DOUBLE_EXP: showTransientHint(R.string.hint_mode_double); break;
             case HALF_FRAME: showTransientHint(R.string.hint_mode_half); break;
-            case QUAD_STRIP: showTransientHint(R.string.hint_mode_quad); break;
             default: showTransientHint(R.string.hint_mode_single); break;
         }
     }
@@ -1634,14 +1399,6 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void updateRollCounter() {
-        if (practiceTheme != null) {
-            String shortTag = PracticeRoll.themeShortLabel(practiceTheme, isChineseLocale());
-            String text = String.format(Locale.US, "%s · %02d/%02d",
-                    shortTag, Math.min(PracticeRoll.ROLL_FRAMES, practiceStep + 1), PracticeRoll.ROLL_FRAMES);
-            rollCounter.setText(text);
-            rollCounter.setTextColor(getColor(R.color.amber_led));
-            return;
-        }
         rollCounter.setTextColor(getColor(R.color.paper_dim));
         int totalFrames = CameraPrefs.framesForMode(shootMode);
         int frameInRoll = Math.min(exposures, totalFrames);
@@ -1650,8 +1407,6 @@ public class MainActivity extends ComponentActivity {
             text = text + (doubleExposureFirstFrame != null ? " · 2/2" : " · 1/2");
         } else if (shootMode == CameraPrefs.ShootMode.HALF_FRAME) {
             text = text + (halfFirstFrame != null ? " · ½B" : " · ½A");
-        } else if (shootMode == CameraPrefs.ShootMode.QUAD_STRIP) {
-            text = text + " · 4F";
         }
         rollCounter.setText(text);
     }
@@ -1685,6 +1440,10 @@ public class MainActivity extends ComponentActivity {
         }
         cancelCountdown();
         cancelSteadyWait(false);
+        aiCoachGen.incrementAndGet();
+        aiCoachBusy = false;
+        if (aiCoachButton != null) aiCoachButton.setAlpha(0.82f);
+        hideAiCoachCard();
         lastFaceActiveMs = 0L;
         lastFaceActiveX = Float.NaN;
         lastFaceActiveY = Float.NaN;
@@ -1695,8 +1454,6 @@ public class MainActivity extends ComponentActivity {
         lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
         exposureHintAutoFaded = false;
         mainHandler.removeCallbacks(autoFadeExposureTask);
-        activeRecommendation = null;
-        updateSceneChipUi();
         refreshAssistHint();
 
         facingFront = !facingFront;
@@ -1710,6 +1467,7 @@ public class MainActivity extends ComponentActivity {
             return;
         }
         cancelSteadyWait(true);
+        hideAiCoachCard();
         DarkroomSheet.show(this, prefs, new DarkroomSheet.Callbacks() {
             @Override
             public void onAspectChanged(CameraPrefs.AspectRatio ratio) {
@@ -1741,19 +1499,12 @@ public class MainActivity extends ComponentActivity {
             public void onLightLeakChanged(boolean enabled) {
                 lightLeakEnabled = enabled;
                 previewView.setLightLeakEnabled(enabled);
-                syncShakeSensorRegistration();
             }
 
             @Override
             public void onBlackMistChanged(boolean enabled) {
                 blackMistEnabled = enabled;
                 previewView.setBlackMistEnabled(enabled);
-            }
-
-            @Override
-            public void onShakeLeakChanged(boolean enabled) {
-                shakeLeakEnabled = enabled;
-                syncShakeSensorRegistration();
             }
 
             @Override
@@ -1775,39 +1526,8 @@ public class MainActivity extends ComponentActivity {
 
             @Override
             public void onAssistSettingsChanged() {
-                assistEnabled = prefs.isAssistEnabled();
-                assistComp = prefs.isAssistComposition();
                 assistExposure = prefs.isAssistExposure();
-                assistMeterBar = prefs.isAssistMeterBar();
-                assistScene = prefs.isAssistScene();
-                assistStability = prefs.isAssistStability();
                 assistSteadyShutter = prefs.isAssistSteadyShutter();
-                syncAssistSensorsAndTelemetry();
-            }
-
-            @Override
-            public void onPracticeRollSelected(PracticeRoll.Theme theme) {
-                practiceTheme = theme;
-                practiceStep = prefs.getPracticeStep();
-                if (theme != null) {
-                    PracticeRoll.StepSpec spec = PracticeRoll.stepSpec(theme, practiceStep);
-                    if (spec.recommendedGrid != CompositionMath.GridMode.OFF) {
-                        gridMode = spec.recommendedGrid;
-                        prefs.setGridMode(gridMode);
-                        updateGridUi();
-                    }
-                    guideTemplate = spec.recommendedTemplate;
-                    prefs.setGuideTemplate(guideTemplate);
-                    updateGuideTemplateUi();
-                    Toast.makeText(MainActivity.this,
-                            getString(R.string.practice_started, PracticeRoll.themeTitle(theme, isChineseLocale())),
-                            Toast.LENGTH_SHORT).show();
-                } else {
-                    guideTemplate = CompositionMath.GuideTemplate.NONE;
-                    prefs.setGuideTemplate(guideTemplate);
-                    updateGuideTemplateUi();
-                }
-                updateRollCounter();
                 syncAssistSensorsAndTelemetry();
             }
 
@@ -2100,8 +1820,7 @@ public class MainActivity extends ComponentActivity {
                                             @NonNull CaptureRequest request,
                                             @NonNull TotalCaptureResult result) {
                                         if (gen != bindGeneration.get()
-                                                || !assistEnabled
-                                                || (!assistComp && !assistScene)) {
+                                                || (!assistExposure && gridMode == CompositionMath.GridMode.OFF)) {
                                             return;
                                         }
                                         handleCamera2Faces(result, wantFront);
@@ -2157,7 +1876,6 @@ public class MainActivity extends ComponentActivity {
         long bestArea = -1L;
         float sx = 0f;
         float sy = 0f;
-        float sTopY = 0f;
         for (Face f : faces) {
             Rect b = f.getBounds();
             if (b == null) continue;
@@ -2172,12 +1890,10 @@ public class MainActivity extends ComponentActivity {
                 best = f;
                 sx = cx;
                 sy = cy;
-                sTopY = Math.max(0f, Math.min(1f, (b.top - crop.top) / (float) crop.height()));
             }
         }
         if (best == null) {
             lastFaceActiveMs = 0L;
-            lastFaceTopNorm = Float.NaN;
             return;
         }
         int manualOff = manualRotation >= 0 ? manualRotation : 0;
@@ -2193,32 +1909,10 @@ public class MainActivity extends ComponentActivity {
                 latestFrameScaleX, latestFrameScaleY);
         if (activePt == null) {
             lastFaceActiveMs = 0L;
-            lastFaceTopNorm = Float.NaN;
             return;
         }
-        float[] edgeA = CompositionMath.mapSensorPointToActiveFrame(
-                sx, sTopY,
-                latestCropL, latestCropT, latestCropR, latestCropB,
-                previewRelativeSensorRotation,
-                baseMirrored,
-                manualOff,
-                extraMirror,
-                latestFrameScaleX, latestFrameScaleY);
-        float[] edgeB = CompositionMath.mapSensorPointToActiveFrame(
-                sx, Math.min(1f, sy + Math.abs(sy - sTopY)),
-                latestCropL, latestCropT, latestCropR, latestCropB,
-                previewRelativeSensorRotation,
-                baseMirrored,
-                manualOff,
-                extraMirror,
-                latestFrameScaleX, latestFrameScaleY);
-        float computedTop = activePt[1];
-        if (edgeA != null) computedTop = Math.min(computedTop, edgeA[1]);
-        if (edgeB != null) computedTop = Math.min(computedTop, edgeB[1]);
-
         lastFaceActiveX = activePt[0];
         lastFaceActiveY = activePt[1];
-        lastFaceTopNorm = computedTop;
         lastFaceActiveMs = SystemClock.uptimeMillis();
     }
 
@@ -2286,6 +1980,7 @@ public class MainActivity extends ComponentActivity {
     // ------------------------------------------------------------------ shutter
 
     private void takePhoto() {
+        hideAiCoachCard();
         if (steadyWaiting) {
             cancelSteadyWait(false);
             captureNow();
@@ -2313,7 +2008,6 @@ public class MainActivity extends ComponentActivity {
     private void startCountdown(int seconds) {
         countdownText.setVisibility(View.VISIBLE);
         refreshAssistHint();
-        updateSceneChipUi();
         activeTimer = new CountDownTimer(seconds * 1000L, 1000L) {
             @Override
             public void onTick(long millisUntilFinished) {
@@ -2342,19 +2036,17 @@ public class MainActivity extends ComponentActivity {
         }
         countdownText.setVisibility(View.GONE);
         refreshAssistHint();
-        updateSceneChipUi();
     }
 
     private void requestCaptureWithSteadyCheck() {
         if (capturing || imageCapture == null) return;
-        if (assistEnabled && assistSteadyShutter && stabilitySensorRegistered
+        if (assistSteadyShutter && stabilitySensorRegistered
                 && stabilityMeter.isReady() && !stabilityMeter.isStable()) {
             steadyWaiting = true;
             steadyWaitStartMs = SystemClock.uptimeMillis();
             shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
             shutterProgress.setWaitingProgress(true, 0.02f);
             refreshAssistHint();
-            updateSceneChipUi();
             mainHandler.removeCallbacks(steadyTickTask);
             mainHandler.postDelayed(steadyTickTask, 16L);
             return;
@@ -2371,7 +2063,6 @@ public class MainActivity extends ComponentActivity {
         }
         if (refreshUi) {
             refreshAssistHint();
-            updateSceneChipUi();
         }
     }
 
@@ -2402,7 +2093,6 @@ public class MainActivity extends ComponentActivity {
         if (capturing || imageCapture == null) return;
         capturing = true;
         refreshAssistHint();
-        updateSceneChipUi();
 
         shutterButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
         if (shutterSoundEnabled && shutterSound != null) {
@@ -2422,16 +2112,6 @@ public class MainActivity extends ComponentActivity {
         final Bitmap firstHalfSnapshot = halfFirstFrame;
         final boolean firstHalfWasLandscape = halfFirstLandscape;
 
-        final long nowMs = SystemClock.uptimeMillis();
-        final PreviewStats shotStats = latestStats;
-        final CompositionMath.FramingAdvice shotFraming = latestFramingAdvice;
-        final boolean shotStable = !stabilitySensorRegistered || !stabilityMeter.isReady() || stabilityMeter.isStable();
-        final boolean shotHadFace = (nowMs - lastFaceActiveMs) <= FACE_STALE_MS && !Float.isNaN(lastFaceActiveX);
-        final boolean shotLevelOn = levelEnabled;
-        final float shotTiltDeg = latestTiltDeg;
-        final int shotEvIdx = (camera != null && evMax > evMin)
-                ? camera.getCameraInfo().getExposureState().getExposureCompensationIndex() : 0;
-
         if (useScreenFlash) {
             beginScreenFlash();
             // Keep the pending shutter on mainHandler so onPause/onDestroy can cancel it;
@@ -2442,48 +2122,17 @@ public class MainActivity extends ComponentActivity {
                     endScreenFlash();
                     capturing = false;
                     refreshAssistHint();
-                    updateSceneChipUi();
                     return;
                 }
-                dispatchCaptureByMode(shotMode, firstDoubleSnapshot, firstHalfSnapshot,
-                        firstHalfWasLandscape, true, shotStats, shotFraming,
-                        shotStable, shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx);
+                executeImageCapture(shotMode, firstDoubleSnapshot, firstHalfSnapshot,
+                        firstHalfWasLandscape, true);
             };
             mainHandler.postDelayed(pendingScreenFlashCapture, 120L);
         } else {
             viewfinderOverlay.triggerShutterEffect();
-            dispatchCaptureByMode(shotMode, firstDoubleSnapshot, firstHalfSnapshot,
-                    firstHalfWasLandscape, false, shotStats, shotFraming,
-                    shotStable, shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx);
+            executeImageCapture(shotMode, firstDoubleSnapshot, firstHalfSnapshot,
+                    firstHalfWasLandscape, false);
         }
-    }
-
-    private void dispatchCaptureByMode(
-            final CameraPrefs.ShootMode shotMode,
-            final Bitmap firstDoubleSnapshot,
-            final Bitmap firstHalfSnapshot,
-            final boolean firstHalfWasLandscape,
-            final boolean usedScreenFlash,
-            final PreviewStats shotStats,
-            final CompositionMath.FramingAdvice shotFraming,
-            final boolean shotStable,
-            final boolean shotHadFace,
-            final boolean shotLevelOn,
-            final float shotTiltDeg,
-            final int shotEvIdx) {
-        if (shotMode == CameraPrefs.ShootMode.QUAD_STRIP) {
-            clearQuadBuffer();
-            int seq = quadGen.incrementAndGet();
-            quadBurstActive = true;
-            quadFirstExif = null;
-            shutterProgress.setBurstProgress(0, 4);
-            executeQuadBurstStep(0, seq, usedScreenFlash, shotStats, shotFraming,
-                    shotStable, shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx);
-            return;
-        }
-        executeImageCapture(shotMode, firstDoubleSnapshot, firstHalfSnapshot,
-                firstHalfWasLandscape, usedScreenFlash, shotStats, shotFraming,
-                shotStable, shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx);
     }
 
     private void executeImageCapture(
@@ -2491,14 +2140,7 @@ public class MainActivity extends ComponentActivity {
             final Bitmap firstDoubleSnapshot,
             final Bitmap firstHalfSnapshot,
             final boolean firstHalfWasLandscape,
-            final boolean usedScreenFlash,
-            final PreviewStats shotStats,
-            final CompositionMath.FramingAdvice shotFraming,
-            final boolean shotStable,
-            final boolean shotHadFace,
-            final boolean shotLevelOn,
-            final float shotTiltDeg,
-            final int shotEvIdx) {
+            final boolean usedScreenFlash) {
         if (isDestroyed() || isFinishing() || imageCapture == null) {
             if (usedScreenFlash) endScreenFlash();
             capturing = false;
@@ -2666,9 +2308,7 @@ public class MainActivity extends ComponentActivity {
                             clearPendingMultiFrame();
                             updateModeUi();
                         }
-                        onPhotoSaved(savedUri, thumb, shotStats, shotFraming, shotStable,
-                                shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx,
-                                useMist, basePreset.grayscale, shotMode);
+                        onPhotoSaved(savedUri, thumb);
                     });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
@@ -2682,7 +2322,6 @@ public class MainActivity extends ComponentActivity {
                         runOnUiThread(() -> {
                             capturing = false;
                             refreshAssistHint();
-                            updateSceneChipUi();
                         });
                     }
                 }
@@ -2694,7 +2333,6 @@ public class MainActivity extends ComponentActivity {
                     if (usedScreenFlash) endScreenFlash();
                     capturing = false;
                     refreshAssistHint();
-                    updateSceneChipUi();
                     Toast.makeText(MainActivity.this,
                             getString(R.string.capture_failed, String.valueOf(exception.getMessage())),
                             Toast.LENGTH_LONG).show();
@@ -2703,243 +2341,12 @@ public class MainActivity extends ComponentActivity {
         });
     }
 
-    private void executeQuadBurstStep(
-            final int step,
-            final int seq,
-            final boolean usedScreenFlash,
-            final PreviewStats shotStats,
-            final CompositionMath.FramingAdvice shotFraming,
-            final boolean shotStable,
-            final boolean shotHadFace,
-            final boolean shotLevelOn,
-            final float shotTiltDeg,
-            final int shotEvIdx) {
-        if (!quadBurstActive || seq != quadGen.get()
-                || isDestroyed() || isFinishing() || imageCapture == null) {
-            runOnUiThread(() -> finishQuadWithCleanup(usedScreenFlash));
-            return;
-        }
-
-        final FilmPreset basePreset = presets[currentPreset];
-        final FilmPreset effectivePreset = filmRecipe.apply(basePreset);
-        final FilmRecipe shotRecipe = filmRecipe;
-        final CameraPrefs.AspectRatio shotAspect = aspectRatio;
-        final CameraPrefs.PaperStyle shotPaper = paperStyle;
-        final CameraPrefs.DateMode shotDate = dateMode;
-        final boolean boostGrain = grainBoost;
-        final boolean useLeak = lightLeakEnabled;
-        final boolean useMist = blackMistEnabled;
-        final float shotLeakSeed = leakSeed;
-        final boolean mirrorSelfie = CameraTransformMath.shouldMirrorCapture(
-                facingFront, frontMirrorEnabled);
-        final int shotTargetRotation = deviceSurfaceRotation;
-        final boolean shotLandscape = (shotTargetRotation == Surface.ROTATION_90
-                || shotTargetRotation == Surface.ROTATION_270);
-        final int nextFrame = (exposures % CameraPrefs.FRAMES_PER_ROLL) + 1;
-        final int shotRoll = rollNumber;
-
-        runOnUiThread(() -> {
-            if (!quadBurstActive || seq != quadGen.get()) return;
-            showTransientHintText(getString(R.string.hint_quad_progress, step + 1));
-            if (step > 0) {
-                shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                viewfinderOverlay.triggerShutterEffect();
-            }
-        });
-
-        imageCapture.setTargetRotation(shotTargetRotation);
-        imageCapture.takePicture(cameraExecutor, new ImageCapture.OnImageCapturedCallback() {
-            @Override
-            public void onCaptureSuccess(@NonNull ImageProxy image) {
-                try {
-                    byte[] jpeg;
-                    int proxyRotation;
-                    try {
-                        jpeg = readJpeg(image);
-                        proxyRotation = image.getImageInfo().getRotationDegrees();
-                    } finally {
-                        image.close();
-                    }
-                    if (!quadBurstActive || seq != quadGen.get() || isDestroyed() || isFinishing()) {
-                        runOnUiThread(() -> finishQuadWithCleanup(usedScreenFlash));
-                        return;
-                    }
-                    if (step == 0) {
-                        quadFirstExif = jpeg;
-                    }
-                    int[] exifTx = exifOrientationTransform(jpeg);
-                    Bitmap source = decode(jpeg, MAX_QUAD_EDGE);
-                    if (source == null) throw new IllegalStateException("Cannot decode burst");
-                    int rotation = CameraTransformMath.resolveCaptureRotation(
-                            exifTx[0], proxyRotation, source.getWidth(), source.getHeight(),
-                            shotTargetRotation, autoDegrees, manualRotation);
-                    Bitmap oriented = transformBitmap(source, rotation, exifTx[1] != 0, mirrorSelfie);
-                    Bitmap cropped = PhotoSaver.cropToAspect(oriented, shotAspect, shotLandscape);
-                    Bitmap rendered = previewView.renderPhoto(
-                            cropped, effectivePreset, boostGrain, useLeak, useMist, shotLeakSeed);
-                    if (rendered != cropped) cropped.recycle();
-
-                    List<Bitmap> snapshotForCompose = null;
-                    synchronized (quadLock) {
-                        if (!quadBurstActive || seq != quadGen.get()) {
-                            if (rendered != null && !rendered.isRecycled()) rendered.recycle();
-                            runOnUiThread(() -> finishQuadWithCleanup(usedScreenFlash));
-                            return;
-                        }
-                        quadFrames.add(rendered);
-                        if (step >= 3) {
-                            snapshotForCompose = new ArrayList<>(quadFrames);
-                        }
-                    }
-
-                    final int doneCount = step + 1;
-                    runOnUiThread(() -> {
-                        if (quadBurstActive && seq == quadGen.get()) {
-                            shutterProgress.setBurstProgress(doneCount, 4);
-                        }
-                    });
-
-                    if (step < 3) {
-                        pendingQuadStepTask = () -> {
-                            pendingQuadStepTask = null;
-                            executeQuadBurstStep(step + 1, seq, usedScreenFlash, shotStats, shotFraming,
-                                    shotStable, shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx);
-                        };
-                        mainHandler.postDelayed(pendingQuadStepTask, QUAD_INTERVAL_MS);
-                        return;
-                    }
-
-                    // All 4 burst frames captured: stitch 4-frame strip/grid & save print.
-                    Bitmap strip = PhotoSaver.composeQuadActionStrip(MainActivity.this, snapshotForCompose, nextFrame);
-                    String exifTelemetry = shotPaper == CameraPrefs.PaperStyle.SPROCKET_35MM
-                            ? PhotoSaver.extractShortExifTelemetry(quadFirstExif) : null;
-                    Bitmap print = PhotoSaver.applyPaper(
-                            MainActivity.this, strip, effectivePreset, shotPaper, shotDate,
-                            shotAspect, nextFrame, null, exifTelemetry);
-                    if (print != strip) strip.recycle();
-
-                    Uri savedUri = PhotoSaver.save(MainActivity.this, print, quadFirstExif,
-                            PhotoSaver.buildRecipeComment(basePreset, boostGrain, useLeak,
-                                    shotRoll, nextFrame, rotation, shotRecipe, useMist,
-                                    CameraPrefs.ShootMode.QUAD_STRIP));
-                    int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
-                    Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
-                    print.recycle();
-
-                    runOnUiThread(() -> {
-                        finishQuadWithCleanup(usedScreenFlash);
-                        onPhotoSaved(savedUri, thumb, shotStats, shotFraming, shotStable,
-                                shotHadFace, shotLevelOn, shotTiltDeg, shotEvIdx,
-                                useMist, basePreset.grayscale, CameraPrefs.ShootMode.QUAD_STRIP);
-                    });
-                } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        finishQuadWithCleanup(usedScreenFlash);
-                        toast(R.string.save_failed);
-                    });
-                }
-            }
-
-            @Override
-            public void onError(@NonNull ImageCaptureException exception) {
-                runOnUiThread(() -> {
-                    finishQuadWithCleanup(usedScreenFlash);
-                    Toast.makeText(MainActivity.this,
-                            getString(R.string.capture_failed, String.valueOf(exception.getMessage())),
-                            Toast.LENGTH_LONG).show();
-                });
-            }
-        });
-    }
-
-    private void finishQuadWithCleanup(boolean usedScreenFlash) {
-        if (usedScreenFlash) endScreenFlash();
-        cancelQuadBurst();
-        capturing = false;
-        refreshAssistHint();
-        updateSceneChipUi();
-    }
-
-    private void cancelQuadBurst() {
-        boolean wasActive = quadBurstActive;
-        quadGen.incrementAndGet();
-        quadBurstActive = false;
-        if (pendingQuadStepTask != null) {
-            mainHandler.removeCallbacks(pendingQuadStepTask);
-            pendingQuadStepTask = null;
-        }
-        clearQuadBuffer();
-        if (shutterProgress != null) {
-            shutterProgress.setBurstProgress(0, 0);
-        }
-        if (wasActive) {
-            capturing = false;
-        }
-    }
-
-    private void clearQuadBuffer() {
-        synchronized (quadLock) {
-            for (Bitmap b : quadFrames) {
-                if (b != null && !b.isRecycled()) b.recycle();
-            }
-            quadFrames.clear();
-            quadFirstExif = null;
-        }
-    }
-
-    private void onPhotoSaved(
-            Uri savedUri, Bitmap thumb,
-            PreviewStats shotStats,
-            CompositionMath.FramingAdvice shotFraming,
-            boolean shotStable,
-            boolean shotHadFace,
-            boolean shotLevelOn,
-            float shotTiltDeg,
-            int shotEvIdx,
-            boolean usedMist,
-            boolean grayscalePreset,
-            CameraPrefs.ShootMode shotMode) {
+    private void onPhotoSaved(Uri savedUri, Bitmap thumb) {
         advanceRollAndThumbnail(savedUri, thumb);
         // Advance the organic leak seed for the next exposure so consecutive
         // shots on the roll get subtle edge variation while staying WYSIWYG.
         leakSeed = (leakSeed + 0.37f) % 1.0f;
         previewView.setLeakSeed(leakSeed);
-
-        PracticeRoll.ShotDiagnostic diag = PracticeRoll.evaluateShot(
-                shotStats, shotFraming, shotStable, shotHadFace, shotLevelOn, shotTiltDeg,
-                shotEvIdx, usedMist, grayscalePreset, shotMode,
-                practiceTheme, practiceStep, isChineseLocale());
-        if (savedUri != null) {
-            prefs.recordShotDiagnostic(savedUri.toString(), diag);
-        }
-        if (practiceTheme != null) {
-            if (practiceStep + 1 >= PracticeRoll.ROLL_FRAMES) {
-                practiceTheme = null;
-                practiceStep = 0;
-                prefs.setPracticeState(null, 0);
-                guideTemplate = CompositionMath.GuideTemplate.NONE;
-                prefs.setGuideTemplate(guideTemplate);
-                updateGuideTemplateUi();
-                updateRollCounter();
-                syncAssistSensorsAndTelemetry();
-                Toast.makeText(this, R.string.practice_done, Toast.LENGTH_LONG).show();
-            } else {
-                practiceStep++;
-                prefs.setPracticeState(practiceTheme, practiceStep);
-                PracticeRoll.StepSpec nextSpec = PracticeRoll.stepSpec(practiceTheme, practiceStep);
-                if (nextSpec.recommendedGrid != CompositionMath.GridMode.OFF) {
-                    gridMode = nextSpec.recommendedGrid;
-                    prefs.setGridMode(gridMode);
-                    updateGridUi();
-                }
-                guideTemplate = nextSpec.recommendedTemplate;
-                prefs.setGuideTemplate(guideTemplate);
-                updateGuideTemplateUi();
-                updateRollCounter();
-                refreshAssistHint();
-            }
-        }
-        showPostShotReview(diag);
         toast(R.string.saved_to_gallery);
     }
 
@@ -3071,7 +2478,6 @@ public class MainActivity extends ComponentActivity {
             orientationListener.enable();
         }
         syncLevelSensorRegistration();
-        syncShakeSensorRegistration();
         syncAssistSensorsAndTelemetry();
         refreshThumbnailAsync();
     }
@@ -3081,7 +2487,6 @@ public class MainActivity extends ComponentActivity {
         isActivityResumed = false;
         cancelCountdown();
         cancelSteadyWait(true);
-        cancelQuadBurst();
         if (pendingScreenFlashCapture != null) {
             // Never leave the shutter locked because a delayed capture was dropped.
             mainHandler.removeCallbacks(pendingScreenFlashCapture);
@@ -3090,12 +2495,10 @@ public class MainActivity extends ComponentActivity {
         }
         mainHandler.removeCallbacks(clearTransientHintTask);
         mainHandler.removeCallbacks(autoFadeExposureTask);
-        mainHandler.removeCallbacks(hidePostReviewTask);
-        mainHandler.removeCallbacks(hideAiInspireTask);
-        aiInspireGen.incrementAndGet();
-        aiInspireBusy = false;
-        hideAiInspirePill();
-        if (aiInspireButton != null) aiInspireButton.setAlpha(0.82f);
+        aiCoachGen.incrementAndGet();
+        aiCoachBusy = false;
+        hideAiCoachCard();
+        if (aiCoachButton != null) aiCoachButton.setAlpha(0.82f);
         endScreenFlash();
         if (orientationListener != null) {
             orientationListener.disable();
@@ -3103,12 +2506,9 @@ public class MainActivity extends ComponentActivity {
         if (sensorManager != null) {
             sensorManager.unregisterListener(levelSensorListener);
             sensorManager.unregisterListener(stabilitySensorListener);
-            sensorManager.unregisterListener(shakeSensorListener);
         }
         stabilitySensorRegistered = false;
-        shakeSensorRegistered = false;
         stabilityMeter.reset();
-        shakeDetector.reset();
         previewView.onPause();
         super.onPause();
     }
@@ -3124,12 +2524,10 @@ public class MainActivity extends ComponentActivity {
         }
         cancelCountdown();
         cancelSteadyWait(false);
-        cancelQuadBurst();
         mainHandler.removeCallbacksAndMessages(null);
         if (sensorManager != null) {
             sensorManager.unregisterListener(levelSensorListener);
             sensorManager.unregisterListener(stabilitySensorListener);
-            sensorManager.unregisterListener(shakeSensorListener);
             sensorManager = null;
         }
         if (!capturing) {

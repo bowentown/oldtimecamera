@@ -117,30 +117,15 @@
                     android:layout_gravity="center" />
 
                 <ImageButton
-                    android:id="@+id/poseGuideButton"
+                    android:id="@+id/aiCoachButton"
                     android:layout_width="30dp"
                     android:layout_height="30dp"
                     android:layout_gravity="bottom|start"
                     android:layout_marginStart="8dp"
                     android:layout_marginBottom="8dp"
-                    android:alpha="0.80"
-                    android:background="@drawable/bg_round_button"
-                    android:contentDescription="@string/hud_pose_guide"
-                    android:padding="6dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_pose_guide"
-                    android:tint="@color/paper" />
-
-                <ImageButton
-                    android:id="@+id/aiInspireButton"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
-                    android:layout_gravity="bottom|start"
-                    android:layout_marginStart="44dp"
-                    android:layout_marginBottom="8dp"
                     android:alpha="0.82"
                     android:background="@drawable/bg_round_button"
-                    android:contentDescription="@string/hud_ai_inspire"
+                    android:contentDescription="@string/hud_ai_coach"
                     android:padding="6dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_sparkle"
@@ -187,49 +172,6 @@
                 android:shadowRadius="12"
                 android:visibility="gone" />
 
-            <!-- Passive dismissible scene film recommendation chip near film strip -->
-            <LinearLayout
-                android:id="@+id/sceneRecommendChip"
-                style="@style/SceneRecommendChip"
-                android:layout_width="wrap_content"
-                android:layout_height="28dp"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="12dp"
-                android:alpha="0"
-                android:clickable="true"
-                android:focusable="true"
-                android:orientation="horizontal"
-                android:visibility="gone">
-
-                <ImageView
-                    android:layout_width="13dp"
-                    android:layout_height="13dp"
-                    android:layout_marginEnd="6dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_sparkle"
-                    android:tint="@color/amber_led" />
-
-                <TextView
-                    android:id="@+id/sceneRecommendLabel"
-                    style="@style/TextCaption"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:textColor="@color/paper" />
-
-                <ImageButton
-                    android:id="@+id/sceneRecommendClose"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:layout_marginStart="2dp"
-                    android:background="@drawable/bg_hud_icon_button"
-                    android:contentDescription="@string/close"
-                    android:padding="5dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_close"
-                    android:tint="@color/paper_dim" />
-            </LinearLayout>
-
             <!-- Optional EV slider drawer floating unobtrusively at bottom of stage -->
             <LinearLayout
                 android:id="@+id/evPanel"
@@ -266,85 +208,6 @@
                     android:gravity="end"
                     android:text="@string/ev_zero"
                     android:textColor="@color/amber_led" />
-            </LinearLayout>
-
-            <!-- Post-shot single-line micro-review pill (non-blocking) -->
-            <TextView
-                android:id="@+id/postShotReviewPill"
-                style="@style/AssistHintPill"
-                android:layout_width="wrap_content"
-                android:layout_height="28dp"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="12dp"
-                android:alpha="0"
-                android:clickable="true"
-                android:focusable="true"
-                android:maxWidth="312dp"
-                android:ellipsize="end"
-                android:visibility="gone" />
-
-            <!-- On-demand AI framing inspiration pill (tap-triggered only) -->
-            <TextView
-                android:id="@+id/aiInspirePill"
-                style="@style/TextCaption"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="12dp"
-                android:alpha="0"
-                android:background="@drawable/bg_assist_pill"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:lineSpacingExtra="2dp"
-                android:maxLines="2"
-                android:maxWidth="308dp"
-                android:paddingStart="14dp"
-                android:paddingTop="6dp"
-                android:paddingEnd="14dp"
-                android:paddingBottom="6dp"
-                android:textColor="@color/amber_led"
-                android:visibility="gone" />
-
-            <!-- Long-press shooting mode bar (1x / 2x / 1/2 / 4F) -->
-            <LinearLayout
-                android:id="@+id/modePickerBar"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/bg_hud_bar"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
-                android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/modePickSingle"
-                    style="@style/HudPill"
-                    android:text="@string/mode_single" />
-
-                <View style="@style/HudDivider" />
-
-                <TextView
-                    android:id="@+id/modePickDouble"
-                    style="@style/HudPill"
-                    android:text="@string/mode_double" />
-
-                <View style="@style/HudDivider" />
-
-                <TextView
-                    android:id="@+id/modePickHalf"
-                    style="@style/HudPill"
-                    android:text="@string/mode_half" />
-
-                <View style="@style/HudDivider" />
-
-                <TextView
-                    android:id="@+id/modePickQuad"
-                    style="@style/HudPill"
-                    android:text="@string/mode_quad" />
             </LinearLayout>
 
             <!-- Inline Film Recipe drawer (long-press any stock chip) -->
@@ -516,168 +379,269 @@
             </LinearLayout>
         </FrameLayout>
 
-        <!-- ============ BOTTOM CAMERA CHASSIS ============ -->
-        <LinearLayout
-            android:id="@+id/bottomDeck"
+        <!-- ============ BOTTOM CAMERA CHASSIS & DOCKED AI COACH ============ -->
+        <FrameLayout
+            android:id="@+id/bottomDock"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/film_black"
-            android:orientation="vertical"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
+            android:background="@color/film_black">
 
-            <!-- Compact 12-bin histogram + analog light meter needle bar -->
-            <com.bowentown.oldtimecamera.MeterStripView
-                android:id="@+id/meterStrip"
-                android:layout_width="228dp"
-                android:layout_height="22dp"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginBottom="6dp"
-                android:contentDescription="@string/hud_meter_bar" />
-
-            <!-- Micro HUD capsule bar -->
             <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:layout_gravity="center_horizontal"
-                android:background="@drawable/bg_hud_bar"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp">
-
-                <TextView
-                    android:id="@+id/zoomPill"
-                    style="@style/HudPill"
-                    android:text="@string/zoom_default" />
-
-                <View style="@style/HudDivider" />
-
-                <TextView
-                    android:id="@+id/aspectPill"
-                    style="@style/HudPill"
-                    android:text="@string/aspect_default" />
-
-                <View style="@style/HudDivider" />
-
-                <TextView
-                    android:id="@+id/evPill"
-                    style="@style/HudPill"
-                    android:text="@string/ev_pill_zero" />
-
-                <View style="@style/HudDivider" />
-
-                <ImageButton
-                    android:id="@+id/gridPill"
-                    android:layout_width="34dp"
-                    android:layout_height="28dp"
-                    android:background="@drawable/bg_hud_icon_button"
-                    android:contentDescription="@string/hud_grid"
-                    android:padding="5dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_grid"
-                    android:tint="@color/paper" />
-
-                <View style="@style/HudDivider" />
-
-                <ImageButton
-                    android:id="@+id/modePill"
-                    android:layout_width="34dp"
-                    android:layout_height="28dp"
-                    android:background="@drawable/bg_hud_icon_button"
-                    android:contentDescription="@string/hud_double_exp"
-                    android:padding="5dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_mode_single"
-                    android:tint="@color/paper" />
-            </LinearLayout>
-
-            <!-- Film stock strip -->
-            <HorizontalScrollView
-                android:id="@+id/filmStripScroll"
+                android:id="@+id/bottomDeck"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:clipToPadding="false"
-                android:overScrollMode="never"
-                android:scrollbars="none">
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <!-- Micro HUD capsule bar -->
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:layout_gravity="center_horizontal"
+                    android:background="@drawable/bg_hud_bar"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp">
+
+                    <TextView
+                        android:id="@+id/zoomPill"
+                        style="@style/HudPill"
+                        android:text="@string/zoom_default" />
+
+                    <View style="@style/HudDivider" />
+
+                    <TextView
+                        android:id="@+id/aspectPill"
+                        style="@style/HudPill"
+                        android:text="@string/aspect_default" />
+
+                    <View style="@style/HudDivider" />
+
+                    <TextView
+                        android:id="@+id/evPill"
+                        style="@style/HudPill"
+                        android:text="@string/ev_pill_zero" />
+
+                    <View style="@style/HudDivider" />
+
+                    <ImageButton
+                        android:id="@+id/gridPill"
+                        android:layout_width="34dp"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_hud_icon_button"
+                        android:contentDescription="@string/hud_grid"
+                        android:padding="5dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_grid"
+                        android:tint="@color/paper" />
+
+                    <View style="@style/HudDivider" />
+
+                    <ImageButton
+                        android:id="@+id/modePill"
+                        android:layout_width="34dp"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_hud_icon_button"
+                        android:contentDescription="@string/hud_double_exp"
+                        android:padding="5dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_mode_single"
+                        android:tint="@color/paper" />
+                </LinearLayout>
+
+                <!-- Film stock strip -->
+                <HorizontalScrollView
+                    android:id="@+id/filmStripScroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:clipToPadding="false"
+                    android:overScrollMode="never"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/chipContainer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp" />
+                </HorizontalScrollView>
+
+                <!-- Shutter deck -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="96dp"
+                    android:layout_marginTop="4dp"
+                    android:paddingStart="28dp"
+                    android:paddingEnd="28dp">
+
+                    <FrameLayout
+                        android:id="@+id/thumbnailFrame"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="start|center_vertical"
+                        android:background="@drawable/bg_thumb"
+                        android:contentDescription="@string/thumbnail"
+                        android:padding="2dp">
+
+                        <ImageView
+                            android:id="@+id/thumbPlaceholder"
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:layout_gravity="center"
+                            android:src="@drawable/ic_film_roll"
+                            android:tint="@color/paper" />
+
+                        <ImageView
+                            android:id="@+id/thumbnail"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scaleType="centerCrop" />
+                    </FrameLayout>
+
+                    <FrameLayout
+                        android:id="@+id/shutterButton"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/bg_shutter_ring"
+                        android:contentDescription="@string/shutter">
+
+                        <com.bowentown.oldtimecamera.ShutterProgressView
+                            android:id="@+id/shutterProgress"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent" />
+
+                        <View
+                            android:id="@+id/shutterCore"
+                            android:layout_width="60dp"
+                            android:layout_height="60dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/bg_shutter_core" />
+                    </FrameLayout>
+
+                    <ImageButton
+                        android:id="@+id/importButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="end|center_vertical"
+                        android:background="@drawable/bg_square_button"
+                        android:contentDescription="@string/darkroom_import"
+                        android:padding="12dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_darkroom_import"
+                        android:tint="@color/paper" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <!-- Actionable AI Coach Card docked cleanly over bottomDeck without blocking live viewfinder -->
+            <LinearLayout
+                android:id="@+id/aiCoachCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/bg_sheet"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="12dp"
+                android:visibility="gone">
 
                 <LinearLayout
-                    android:id="@+id/chipContainer"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp" />
-            </HorizontalScrollView>
-
-            <!-- Shutter deck -->
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="96dp"
-                android:layout_marginTop="4dp"
-                android:paddingStart="28dp"
-                android:paddingEnd="28dp">
-
-                <FrameLayout
-                    android:id="@+id/thumbnailFrame"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_gravity="start|center_vertical"
-                    android:background="@drawable/bg_thumb"
-                    android:contentDescription="@string/thumbnail"
-                    android:padding="2dp">
+                    android:layout_marginBottom="6dp">
 
                     <ImageView
-                        android:id="@+id/thumbPlaceholder"
-                        android:layout_width="22dp"
-                        android:layout_height="22dp"
-                        android:layout_gravity="center"
-                        android:src="@drawable/ic_film_roll"
-                        android:tint="@color/paper" />
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_marginEnd="6dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_sparkle"
+                        android:tint="@color/amber_led" />
 
-                    <ImageView
-                        android:id="@+id/thumbnail"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:scaleType="centerCrop" />
-                </FrameLayout>
+                    <TextView
+                        style="@style/TextMonoCaption"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/ai_coach_title"
+                        android:textColor="@color/amber_led" />
 
-                <FrameLayout
-                    android:id="@+id/shutterButton"
-                    android:layout_width="76dp"
-                    android:layout_height="76dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_shutter_ring"
-                    android:contentDescription="@string/shutter">
+                    <TextView
+                        android:id="@+id/aiCoachRefreshBtn"
+                        style="@style/TextMonoCaption"
+                        android:layout_width="wrap_content"
+                        android:layout_height="24dp"
+                        android:background="@drawable/bg_pill_ripple"
+                        android:gravity="center"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/ai_coach_refresh"
+                        android:textColor="@color/paper_dim" />
 
-                    <com.bowentown.oldtimecamera.ShutterProgressView
-                        android:id="@+id/shutterProgress"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent" />
+                    <ImageButton
+                        android:id="@+id/aiCoachCloseBtn"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_marginStart="2dp"
+                        android:background="@drawable/bg_hud_icon_button"
+                        android:contentDescription="@string/close"
+                        android:padding="5dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_close"
+                        android:tint="@color/paper_dim" />
+                </LinearLayout>
 
-                    <View
-                        android:id="@+id/shutterCore"
-                        android:layout_width="60dp"
-                        android:layout_height="60dp"
-                        android:layout_gravity="center"
-                        android:background="@drawable/bg_shutter_core" />
-                </FrameLayout>
+                <TextView
+                    android:id="@+id/aiCoachDiag"
+                    style="@style/TextCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
+                    android:ellipsize="end"
+                    android:textColor="@color/paper" />
 
-                <ImageButton
-                    android:id="@+id/importButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_gravity="end|center_vertical"
-                    android:background="@drawable/bg_square_button"
-                    android:contentDescription="@string/darkroom_import"
-                    android:padding="12dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_darkroom_import"
-                    android:tint="@color/paper" />
-            </FrameLayout>
-        </LinearLayout>
+                <TextView
+                    android:id="@+id/aiCoachAction"
+                    style="@style/TextCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="2dp"
+                    android:maxLines="3"
+                    android:ellipsize="end"
+                    android:textColor="@color/paper_soft" />
+
+                <TextView
+                    android:id="@+id/aiCoachApplyBtn"
+                    style="@style/TextMonoCaption"
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_segment_active"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:singleLine="true"
+                    android:textColor="@color/ink"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </FrameLayout>
     </LinearLayout>
 
     <!-- Shutter flash overlay -->

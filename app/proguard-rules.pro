@@ -3,7 +3,6 @@
 -keep class com.bowentown.oldtimecamera.AspectFrameLayout { *; }
 -keep class com.bowentown.oldtimecamera.ViewfinderOverlayView { *; }
 -keep class com.bowentown.oldtimecamera.ShutterProgressView { *; }
--keep class com.bowentown.oldtimecamera.MeterStripView { *; }
 
 # CameraX / Camera2 interop is driven by annotations and generics at runtime.
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
