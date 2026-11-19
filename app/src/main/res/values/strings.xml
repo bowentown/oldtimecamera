@@ -72,8 +72,12 @@
     <string name="shutter_sound">快门声</string>
     <string name="front_mirror">镜像</string>
 
+    <string name="assist_move_guide">实时移动引导</string>
     <string name="assist_exposure">曝光轻提示</string>
     <string name="assist_steady_shutter">稳拍快门</string>
+
+    <string name="move_cue_closer">往前</string>
+    <string name="move_cue_back">往后</string>
 
     <string name="hint_overexposed">太亮 · 下拉 EV</string>
     <string name="hint_underexposed">偏暗 · 上推 EV</string>

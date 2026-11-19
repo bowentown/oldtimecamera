@@ -113,6 +113,7 @@ public final class CameraPrefs {
     private static final String KEY_MANUAL_ROTATION = "manual_rotation";
     private static final String KEY_LAST_PHOTO_URI = "last_photo_uri";
 
+    private static final String KEY_ASSIST_MOVE_GUIDE = "assist_move_guide";
     private static final String KEY_ASSIST_EXPOSURE = "assist_exposure";
     private static final String KEY_ASSIST_STEADY_SHUTTER = "assist_steady_shutter";
 
@@ -272,6 +273,14 @@ public final class CameraPrefs {
 
     public void setManualRotation(int degrees) {
         sp.edit().putInt(KEY_MANUAL_ROTATION, degrees).apply();
+    }
+
+    public boolean isAssistMoveGuide() {
+        return sp.getBoolean(KEY_ASSIST_MOVE_GUIDE, true);
+    }
+
+    public void setAssistMoveGuide(boolean enabled) {
+        sp.edit().putBoolean(KEY_ASSIST_MOVE_GUIDE, enabled).apply();
     }
 
     public boolean isAssistExposure() {

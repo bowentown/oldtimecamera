@@ -66,12 +66,21 @@ public final class AiCoachClient {
             PreviewStats stats, float tiltDeg, String presetId, String presetName,
             float currentEvStops, String aspectLabel, boolean facingFront,
             boolean zh) throws Exception {
+        return adviseViewfinder(context, prefs, previewBitmap, stats, tiltDeg,
+                presetId, presetName, currentEvStops, aspectLabel, facingFront, zh, null);
+    }
+
+    public static AiCoachMath.AiAdvice adviseViewfinder(
+            Context context, CameraPrefs prefs, Bitmap previewBitmap,
+            PreviewStats stats, float tiltDeg, String presetId, String presetName,
+            float currentEvStops, String aspectLabel, boolean facingFront,
+            boolean zh, CompositionMath.MoveCue liveCue) throws Exception {
         Config cfg = readConfig(context, prefs);
         boolean useImage = cfg.visionEnabled && previewBitmap != null && !previewBitmap.isRecycled();
         String jpegDataUrl = useImage ? encodeScaledDataUrl(previewBitmap, 640, 80) : null;
         String userText = AiCoachMath.buildViewfinderUserContext(
                 stats, tiltDeg, presetId, presetName, currentEvStops, aspectLabel,
-                facingFront, useImage, zh);
+                facingFront, useImage, zh, liveCue);
         String reply = requestChatCompletion(
                 context, cfg.endpointUrl, cfg.apiKey, cfg.model,
                 AiCoachMath.buildViewfinderCoachSystemPrompt(zh),

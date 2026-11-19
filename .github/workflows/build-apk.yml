@@ -74,9 +74,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: OldTimeCamera-APK
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
+          # Publish only the release APK in the main downloadable artifact so debug
+          # builds (.debug package suffix) cannot create duplicate app icons on phones.
+          path: app/build/outputs/apk/release/*.apk
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -94,8 +94,6 @@ jobs:
       - name: Attach signed release APK
         uses: softprops/action-gh-release@v2
         with:
-          # Only the properly signed release build is published; a debug-signed
-          # artifact is a tampering liability and stays in Actions artifacts only.
-          files: apk/release/app-release.apk
-          fail_on_unmatched_files: false
+          files: apk/app-release.apk
+          fail_on_unmatched_files: true
           generate_release_notes: true

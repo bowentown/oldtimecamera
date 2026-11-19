@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.util.AttributeSet;
+import android.util.TypedValue;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -74,6 +75,20 @@ public final class ViewfinderOverlayView extends View {
 
     private Bitmap halfFrameThumb = null;
 
+    private CompositionMath.MoveCue targetMoveCue = CompositionMath.MoveCue.EMPTY;
+    private CompositionMath.MoveCue drawingMoveCue = CompositionMath.MoveCue.EMPTY;
+    private String drawingDepthLabel = "";
+    private boolean topCenterReserved = false;
+    private float moveCueAlpha = 0f;
+    private ValueAnimator moveCueAnimator;
+
+    private final Paint movePillFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint movePillStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint moveGlyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint moveDotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint moveTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF tmpMoveRect = new RectF();
+
     public ViewfinderOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
         float d = getResources().getDisplayMetrics().density;
@@ -121,6 +136,28 @@ public final class ViewfinderOverlayView extends View {
         halfFrameBorderPaint.setColor(0xDDF2A65A);
         halfFrameBorderPaint.setStyle(Paint.Style.STROKE);
         halfFrameBorderPaint.setStrokeWidth(1.2f * d);
+
+        movePillFillPaint.setColor(0x9611100E);
+        movePillFillPaint.setStyle(Paint.Style.FILL);
+
+        movePillStrokePaint.setColor(0x88F2A65A);
+        movePillStrokePaint.setStyle(Paint.Style.STROKE);
+        movePillStrokePaint.setStrokeWidth(0.95f * d);
+
+        moveGlyphPaint.setColor(0xFFF2A65A);
+        moveGlyphPaint.setStyle(Paint.Style.STROKE);
+        moveGlyphPaint.setStrokeWidth(1.65f * d);
+        moveGlyphPaint.setStrokeCap(Paint.Cap.ROUND);
+        moveGlyphPaint.setStrokeJoin(Paint.Join.ROUND);
+
+        moveDotPaint.setColor(0xFFF2A65A);
+        moveDotPaint.setStyle(Paint.Style.FILL);
+
+        moveTextPaint.setColor(0xFFF0E8D8);
+        moveTextPaint.setTypeface(FilmUiHelper.monoFont(context));
+        moveTextPaint.setTextSize(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP, 10.5f, getResources().getDisplayMetrics()));
+        moveTextPaint.setTextAlign(Paint.Align.LEFT);
     }
 
     public void setOnFrameBoundsListener(OnFrameBoundsListener listener) {
@@ -181,6 +218,62 @@ public final class ViewfinderOverlayView extends View {
             invalidate();
         });
         snapAnimator.start();
+    }
+
+    /** Updates peripheral minimalist camera-movement symbols with gentle fade transitions. */
+    public void setMoveCue(CompositionMath.MoveCue cue, String depthLabel, boolean topReserved) {
+        CompositionMath.MoveCue safe = cue != null ? cue : CompositionMath.MoveCue.EMPTY;
+        String safeLabel = depthLabel != null ? depthLabel : "";
+        boolean sameCue = safe.equals(targetMoveCue)
+                && safeLabel.equals(drawingDepthLabel)
+                && Math.abs(safe.strengthX - targetMoveCue.strengthX) < 0.08f
+                && Math.abs(safe.strengthY - targetMoveCue.strengthY) < 0.08f;
+        if (sameCue && this.topCenterReserved == topReserved) {
+            return;
+        }
+        this.topCenterReserved = topReserved;
+        this.targetMoveCue = safe;
+
+        if (!safe.isEmpty()) {
+            this.drawingMoveCue = safe;
+            this.drawingDepthLabel = safeLabel;
+            if (moveCueAlpha >= 0.99f) {
+                invalidate();
+                return;
+            }
+            animateMoveCueAlpha(1f, 150L);
+        } else {
+            if (moveCueAlpha <= 0.005f) {
+                this.drawingMoveCue = CompositionMath.MoveCue.EMPTY;
+                this.drawingDepthLabel = "";
+                invalidate();
+                return;
+            }
+            animateMoveCueAlpha(0f, 210L);
+        }
+    }
+
+    public void setTopCenterReserved(boolean reserved) {
+        if (this.topCenterReserved != reserved) {
+            this.topCenterReserved = reserved;
+            invalidate();
+        }
+    }
+
+    private void animateMoveCueAlpha(float toAlpha, long durationMs) {
+        if (moveCueAnimator != null) moveCueAnimator.cancel();
+        moveCueAnimator = ValueAnimator.ofFloat(moveCueAlpha, toAlpha);
+        moveCueAnimator.setDuration(durationMs);
+        moveCueAnimator.setInterpolator(new DecelerateInterpolator());
+        moveCueAnimator.addUpdateListener(anim -> {
+            moveCueAlpha = (float) anim.getAnimatedValue();
+            if (targetMoveCue.isEmpty() && moveCueAlpha <= 0.005f) {
+                drawingMoveCue = CompositionMath.MoveCue.EMPTY;
+                drawingDepthLabel = "";
+            }
+            invalidate();
+        });
+        moveCueAnimator.start();
     }
 
     public void setFrameScale(float scaleX, float scaleY, boolean animate) {
@@ -336,6 +429,7 @@ public final class ViewfinderOverlayView extends View {
         if (focusAnimator != null) focusAnimator.cancel();
         if (snapAnimator != null) snapAnimator.cancel();
         if (shutterAnimator != null) shutterAnimator.cancel();
+        if (moveCueAnimator != null) moveCueAnimator.cancel();
         if (ghostBitmap != null && !ghostBitmap.isRecycled()) {
             ghostBitmap.recycle();
             ghostBitmap = null;
@@ -384,6 +478,7 @@ public final class ViewfinderOverlayView extends View {
 
         float d = getResources().getDisplayMetrics().density;
         drawCompositionOverlay(canvas, d);
+        drawMoveGuide(canvas, d);
 
         // Compact inset preview of frame 1/2 while composing half-frame 2/2.
         if (halfFrameThumb != null && !halfFrameThumb.isRecycled()) {
@@ -544,5 +639,118 @@ public final class ViewfinderOverlayView extends View {
         }
 
         canvas.restore();
+    }
+
+    private void drawMoveGuide(Canvas canvas, float d) {
+        if (moveCueAlpha <= 0.01f || drawingMoveCue.isEmpty()
+                || activeRect.width() < 120f * d || activeRect.height() < 90f * d) {
+            return;
+        }
+        canvas.save();
+        canvas.clipRect(activeRect);
+
+        movePillFillPaint.setAlpha(Math.round(152f * moveCueAlpha));
+        movePillStrokePaint.setAlpha(Math.round(145f * moveCueAlpha));
+        moveGlyphPaint.setAlpha(Math.round(240f * moveCueAlpha));
+        moveDotPaint.setAlpha(Math.round(235f * moveCueAlpha));
+        moveTextPaint.setAlpha(Math.round(235f * moveCueAlpha));
+
+        final float edgeInset = 19f * d;
+        if (drawingMoveCue.panX == CompositionMath.PanX.LEFT) {
+            drawEdgeArrowBadge(canvas, activeRect.left + edgeInset, activeRect.centerY(),
+                    180f, drawingMoveCue.strengthX > 0.45f, d);
+        } else if (drawingMoveCue.panX == CompositionMath.PanX.RIGHT) {
+            drawEdgeArrowBadge(canvas, activeRect.right - edgeInset, activeRect.centerY(),
+                    0f, drawingMoveCue.strengthX > 0.45f, d);
+        }
+
+        if (drawingMoveCue.panY == CompositionMath.PanY.UP) {
+            float topY = (topCenterReserved && activeRect.top < 42f * d)
+                    ? Math.max(activeRect.top + edgeInset, 42f * d + 12f * d)
+                    : activeRect.top + edgeInset;
+            drawEdgeArrowBadge(canvas, activeRect.centerX(), topY,
+                    -90f, drawingMoveCue.strengthY > 0.45f, d);
+        } else if (drawingMoveCue.panY == CompositionMath.PanY.DOWN) {
+            drawEdgeArrowBadge(canvas, activeRect.centerX(), activeRect.bottom - edgeInset,
+                    90f, drawingMoveCue.strengthY > 0.45f, d);
+        }
+
+        if (drawingMoveCue.depth != CompositionMath.DepthMove.NONE && activeRect.width() >= 170f * d) {
+            float depthY = activeRect.bottom - (drawingMoveCue.panY == CompositionMath.PanY.DOWN
+                    ? 46f * d : 20f * d);
+            if (depthY - 14f * d > activeRect.top + 28f * d) {
+                drawDepthBadge(canvas, activeRect.centerX(), depthY,
+                        drawingMoveCue.depth, drawingDepthLabel, d);
+            }
+        }
+
+        canvas.restore();
+    }
+
+    private void drawEdgeArrowBadge(Canvas canvas, float cx, float cy,
+                                    float angleDeg, boolean strong, float d) {
+        float r = 11.5f * d;
+        canvas.drawCircle(cx, cy, r, movePillFillPaint);
+        canvas.drawCircle(cx, cy, r, movePillStrokePaint);
+
+        canvas.save();
+        canvas.rotate(angleDeg, cx, cy);
+        float shaftL = -4.2f * d;
+        float tipX = 4.2f * d;
+        float head = 3.1f * d;
+        canvas.drawLine(shaftL, 0f, tipX, 0f, moveGlyphPaint);
+        canvas.drawLine(tipX - head, -head, tipX, 0f, moveGlyphPaint);
+        canvas.drawLine(tipX - head, head, tipX, 0f, moveGlyphPaint);
+
+        if (strong) {
+            float cx2 = -15.5f * d;
+            canvas.drawLine(cx2 - 2.2f * d, -2.6f * d, cx2 + 0.8f * d, 0f, moveGlyphPaint);
+            canvas.drawLine(cx2 - 2.2f * d, 2.6f * d, cx2 + 0.8f * d, 0f, moveGlyphPaint);
+        }
+        canvas.restore();
+    }
+
+    private void drawDepthBadge(Canvas canvas, float cx, float cy,
+                                CompositionMath.DepthMove depth, String label, float d) {
+        boolean hasLabel = label != null && !label.isEmpty();
+        float textW = hasLabel ? moveTextPaint.measureText(label) : 0f;
+        float iconW = 24f * d;
+        float gap = hasLabel ? 6f * d : 0f;
+        float padH = 10f * d;
+        float totalW = padH * 2f + iconW + gap + textW;
+        float pillH = 24f * d;
+
+        tmpMoveRect.set(cx - totalW * 0.5f, cy - pillH * 0.5f, cx + totalW * 0.5f, cy + pillH * 0.5f);
+        canvas.drawRoundRect(tmpMoveRect, pillH * 0.5f, pillH * 0.5f, movePillFillPaint);
+        canvas.drawRoundRect(tmpMoveRect, pillH * 0.5f, pillH * 0.5f, movePillStrokePaint);
+
+        float ix = tmpMoveRect.left + padH + iconW * 0.5f;
+        canvas.drawCircle(ix, cy, 1.8f * d, moveDotPaint);
+
+        float chevH = 3.0f * d;
+        float chevW = 3.2f * d;
+        if (depth == CompositionMath.DepthMove.CLOSER) {
+            // Inward converging chevrons (> · <) for stepping closer.
+            float lx = ix - 4.2f * d;
+            canvas.drawLine(lx - chevW, cy - chevH, lx, cy, moveGlyphPaint);
+            canvas.drawLine(lx - chevW, cy + chevH, lx, cy, moveGlyphPaint);
+            float rx = ix + 4.2f * d;
+            canvas.drawLine(rx + chevW, cy - chevH, rx, cy, moveGlyphPaint);
+            canvas.drawLine(rx + chevW, cy + chevH, rx, cy, moveGlyphPaint);
+        } else {
+            // Outward diverging chevrons (< · >) for stepping back.
+            float lx = ix - 8.8f * d;
+            canvas.drawLine(lx + chevW, cy - chevH, lx, cy, moveGlyphPaint);
+            canvas.drawLine(lx + chevW, cy + chevH, lx, cy, moveGlyphPaint);
+            float rx = ix + 8.8f * d;
+            canvas.drawLine(rx - chevW, cy - chevH, rx, cy, moveGlyphPaint);
+            canvas.drawLine(rx - chevW, cy + chevH, rx, cy, moveGlyphPaint);
+        }
+
+        if (hasLabel) {
+            Paint.FontMetrics fm = moveTextPaint.getFontMetrics();
+            float textY = cy - (fm.ascent + fm.descent) * 0.5f;
+            canvas.drawText(label, tmpMoveRect.left + padH + iconW + gap, textY, moveTextPaint);
+        }
     }
 }

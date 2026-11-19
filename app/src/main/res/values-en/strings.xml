@@ -72,8 +72,12 @@
     <string name="shutter_sound">Shutter Sound</string>
     <string name="front_mirror">Front Mirror</string>
 
+    <string name="assist_move_guide">Live Move Cues</string>
     <string name="assist_exposure">Exposure Hint</string>
     <string name="assist_steady_shutter">Steady Shutter</string>
+
+    <string name="move_cue_closer">CLOSER</string>
+    <string name="move_cue_back">BACK</string>
 
     <string name="hint_overexposed">Bright · EV -</string>
     <string name="hint_underexposed">Dark · EV +</string>

@@ -60,4 +60,39 @@ public class ExposureAdvisorTest {
         assertEquals(ExposureAdvisor.Advice.BACKLIT,
                 advisor.evaluate(stats(0.50f, 0.05f, 0.20f, 0.22f, 0.74f), 6300L));
     }
+
+    @Test
+    public void previewStats_measuresCompactSubjectSpreadAndBorderEdges() {
+        int w = 32;
+        int h = 24;
+        byte[] centerPatch = new byte[w * h * 4];
+        for (int y = 10; y < 14; y++) {
+            for (int x = 14; x < 18; x++) {
+                int i = (y * w + x) * 4;
+                centerPatch[i] = (byte) 220;
+                centerPatch[i + 1] = (byte) 220;
+                centerPatch[i + 2] = (byte) 220;
+                centerPatch[i + 3] = (byte) 255;
+            }
+        }
+        PreviewStats smallCenter = PreviewStats.fromRgbaBytes(centerPatch, w, h, false);
+        assertTrue(smallCenter.saliencyConfidence > 0.25f);
+        assertTrue("Expected compact saliencySpread < 0.14, got " + smallCenter.saliencySpread,
+                smallCenter.saliencySpread < 0.14f);
+        assertEquals(0f, smallCenter.borderEdgeRatio, 0.02f);
+
+        byte[] edgePatch = new byte[w * h * 4];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < 3; x++) {
+                int i = (y * w + x) * 4;
+                edgePatch[i] = (byte) 230;
+                edgePatch[i + 1] = (byte) 230;
+                edgePatch[i + 2] = (byte) 230;
+                edgePatch[i + 3] = (byte) 255;
+            }
+        }
+        PreviewStats borderHeavy = PreviewStats.fromRgbaBytes(edgePatch, w, h, false);
+        assertTrue("Expected high borderEdgeRatio, got " + borderHeavy.borderEdgeRatio,
+                borderHeavy.borderEdgeRatio > 0.5f);
+    }
 }

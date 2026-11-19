@@ -1,6 +1,6 @@
 # 旧时光相机 · Old Time Camera
 
-一个克制、优雅的 Android 纯本地胶片相机（`v1.7.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
+一个克制、优雅的 Android 纯本地胶片相机（`v1.8.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
 实时预览与全分辨率成片共用同一套 OpenGL ES 片元着色器，拍摄或导入洗印后叠上相纸边框、编号与复古橙色日期背印，写入系统相册并保留相机拍摄 EXIF 元数据。
 
 默认全离线运行、无账号、无统计/广告 SDK。网络访问**仅在用户主动点击**时发生：暗房面板里的「检查更新」（GitHub Releases API）与可选的 **BYOK AI 摄影导师**（支持自带 DeepSeek `deepseek-flash` / 通义千问 VL / OpenAI / 自定义兼容接口 API Key，经 `AndroidKeyStore` 加密保存在本机，绝不后台扫描或偷跑流量）。
@@ -14,7 +14,8 @@
   - 统一接入开源线性图标族 **Phosphor Icons**（Regular，MIT）与内置等宽字体 **JetBrains Mono Regular**（OFL 1.1），确保帧数计数、EV、焦段与底片页码具备一致的光学器械精密感。
   - 取景器与底栏分区明晰，切换画幅时仿旁轴相机的遮幅帘幕平滑收合；支持点击或长按取景框右下角橙色 LED 日期直接切换/隐藏日期印记。
 - **克制的构图与拍摄辅助**：
-  - **纯净取景辅助线**：顶部网格按钮循环切换 `关 → 三分线 → 黄金螺旋 → 中心十字`（黄金螺旋模式下长按旋转 `90°` 起始方向），搭配机械风格实时水平仪；无任何遮挡画面的箭头、圆圈或人物线稿。
+  - **实时移动引导（画框边缘极简符号，零遮挡主体）**：结合 Camera2 人脸边界（`mapSensorBoxToActiveFrame`）、点按对焦点与 `32×24` 显著性重心/离散度（`MoveGuideState` + 迟滞防抖），仅在主体偏移或距离失衡时于取景框四边中点渐显极简琥珀方向环（`←` / `→` / `↑` / `↓`）并在底边中央轻提示距离徽标（`»·« 往前` / `«·» 往后`），构图到位即自动淡出，绝不在脸上划线。
+  - **纯净取景辅助线**：顶部网格按钮循环切换 `关 → 三分线 → 黄金螺旋 → 中心十字`（黄金螺旋模式下长按旋转 `90°` 起始方向），搭配机械风格实时水平仪。
   - **曝光轻提示（单行轻点一键修正）**：`GLFilmRenderer` 从主预览流下采样 `32×24` 原始帧，`ExposureAdvisor` 仅在过曝、欠曝或明显逆光时显示可点单行轻提示，点击直接补偿 EV 或对主体测光，无操作自动淡出。
   - **稳拍快门**：`StabilityMeter` 基于陀螺仪角速率（无陀螺仪回退高通加速度计）判断手抖状态；开启后按快门会在快门外环绘制最长 `1.5s` 的琥珀等待弧，持稳、超时或再次点按快门立即成像。
 - **BYOK AI 摄影导师（按需看片诊断 + 一键套用）**：
@@ -86,7 +87,7 @@
 需要 JDK 17、Android SDK（platform 36 + build-tools 36.0.0），并配置 `ANDROID_HOME` / `local.properties`：
 
 ```bash
-./gradlew testDebugUnitTest  # 运行 9 个 JVM 单元测试类（49 项测试）
+./gradlew testDebugUnitTest  # 运行 9 个 JVM 单元测试类（52 项测试）
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 需 keystore.properties，否则产出 unsigned 包
 ```
@@ -102,8 +103,8 @@
 
 ### GitHub Actions
 
-- `pull_request`、`main` push、`workflow_dispatch`：安装依赖 → 跑单测 → 构建 debug + release → 上传 artifact。
-- `v*` tag：额外触发 `release` job（仅该 job 拥有 `contents: write`），把**已签名的** `app-release.apk` 挂到 GitHub Release；debug 包只留在 Actions artifact 中，不再对外发布。
+- `pull_request`、`main` push、`workflow_dispatch`：安装依赖 → 跑单测 → 构建 debug（仅验证编译，且桌面名为 `旧时光 · 测试` 避免与正式版混淆）与 release → 仅将 release APK 上传至 artifact。
+- `v*` tag：额外触发 `release` job（仅该 job 拥有 `contents: write`），把**已签名的** `app-release.apk`（固定包名 `com.bowentown.oldtimecamera` 与固定正式签名证书）挂到 GitHub Release，支持旧版正式包直接原地覆盖更新；debug 包不再随构建产出打包提供。
 - 签名材料来自仓库 Secrets（`OTC_KEYSTORE_BASE64` / `OTC_STORE_PASSWORD` / `OTC_KEY_ALIAS` / `OTC_KEY_PASSWORD`），构建时写入 runner 临时目录，随 runner 销毁。
 
 ## 4. 目录
@@ -116,14 +117,14 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── DarkroomEditorDialog.java   相册照片导入暗房洗印、套用当前胶片配方与相纸注记
 ├── AspectFrameLayout.java      按相机缓冲宽高比锁定取景宿主容器
 ├── FilmCameraView.java         GLSurfaceView 封装、手势、GL 任务队列、资源释放
-├── ViewfinderOverlayView.java  遮幅帘幕、角标、纯净网格/黄金螺旋、水平仪、双曝/半格预览
+├── ViewfinderOverlayView.java  遮幅帘幕、角标、边缘移动极简符号、网格/黄金螺旋、水平仪、双曝/半格预览
 ├── ShutterProgressView.java    稳拍等待琥珀进度弧
 ├── GLFilmRenderer.java         统一 GLSL（含黑柔光漫射）、纹理变换、测光 FBO、离屏成片、GL 资源释放
 ├── FilmRenderMath.java         颗粒尺度一致性、黑柔光步长与指针测光停档换算（纯 Java）
 ├── FilmRecipe.java             胶片浓度/颗粒/冷暖自定义配方合成与存储（纯 Java）
 ├── CameraTransformMath.java    GL UV 矩阵、hasCameraTransform 双路径、EXIF 与方向量化
-├── CompositionMath.java        三分/黄金螺旋/十字几何与传感器坐标映射
-├── PreviewStats.java           32×24 原始帧亮度/12 档分布/高光/死黑/色温/显著性
+├── CompositionMath.java        构图几何、黄金螺旋、四向/前后防抖移动引导状态机、传感器边界反算
+├── PreviewStats.java           32×24 原始帧亮度/12 档分布/高光/死黑/色温/显著性重心与离散度
 ├── ExposureAdvisor.java        实时曝光轻提示与迟滞状态机
 ├── StabilityMeter.java         滑动窗口 RMS 手抖检测（稳拍快门判定）
 ├── FilmPreset.java             胶片配方参数模型
@@ -140,7 +141,7 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── UpdateChecker.java          GitHub Releases 检查更新与证书校验安装
 └── VersionMath.java            语义化版本比较（纯 Java）
 app/src/main/assets/licenses/   MIT、OFL、NOTICE 全文（随 APK 分发）
-app/src/test/java/com/bowentown/oldtimecamera/   9 个纯 JVM 测试类（49 项测试）
+app/src/test/java/com/bowentown/oldtimecamera/   9 个纯 JVM 测试类（52 项测试）
 LICENSES/                       仓库侧第三方许可全文
 NOTICE                          专有声明 + 第三方资产例外 + 商标说明
 docs/                           OFL 原文与开源项目调研

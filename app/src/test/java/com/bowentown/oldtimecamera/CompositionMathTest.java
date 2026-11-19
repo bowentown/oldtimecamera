@@ -202,4 +202,101 @@ public class CompositionMathTest {
         assertEquals(0.8f, unmirroredManual[0], 1e-4f);
         assertEquals(0.7f, unmirroredManual[1], 1e-4f);
     }
+
+    @Test
+    public void mapSensorBoxToActiveFrame_preservesUnclippedSpanAndClippedState() {
+        // Identity transform with XPAN curtain (scaleY = 0.35 => visible vertical band [0.325, 0.675]).
+        // Face spans sensor Y [0.25 .. 0.60] -> partially extends above top curtain -> rawHeight = 1.0, clipped = true.
+        CompositionMath.ActiveBox box = CompositionMath.mapSensorBoxToActiveFrame(
+                0.35f, 0.25f, 0.65f, 0.60f,
+                0f, 0f, 1f, 1f,
+                0, false, 0, false,
+                1f, 0.35f);
+        assertNotNull(box);
+        assertTrue(box.clipped);
+        assertEquals(1.0f, box.rawHeight, 0.02f);
+
+        // Completely above the masked XPAN curtain -> returns null.
+        assertNull(CompositionMath.mapSensorBoxToActiveFrame(
+                0.35f, 0.05f, 0.65f, 0.20f,
+                0f, 0f, 1f, 1f,
+                0, false, 0, false,
+                1f, 0.35f));
+    }
+
+    @Test
+    public void moveGuideState_guidesDirectionsAndDepthWithHysteresis() {
+        CompositionMath.MoveGuideState state = new CompositionMath.MoveGuideState();
+
+        // 1. Centered, well-proportioned portrait with Grid OFF -> zero hints
+        CompositionMath.ActiveBox centeredPortrait =
+                new CompositionMath.ActiveBox(0.38f, 0.22f, 0.62f, 0.48f, 0.24f, 0.26f, false);
+        CompositionMath.MoveCue okCue = state.evaluate(
+                true, centeredPortrait, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0);
+        assertTrue(okCue.isEmpty());
+
+        // 2. Face far to the LEFT edge -> camera should pan LEFT
+        state.reset();
+        CompositionMath.ActiveBox farLeft =
+                new CompositionMath.ActiveBox(0.06f, 0.22f, 0.26f, 0.48f, 0.20f, 0.26f, false);
+        CompositionMath.MoveCue leftCue = state.evaluate(
+                true, farLeft, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0);
+        assertEquals(CompositionMath.PanX.LEFT, leftCue.panX);
+        assertEquals(CompositionMath.PanY.NONE, leftCue.panY);
+
+        // 3. Hysteresis: moving slightly back inside [0.26 .. 0.31] stays LEFT without jitter
+        CompositionMath.ActiveBox edgeBand =
+                new CompositionMath.ActiveBox(0.18f, 0.22f, 0.38f, 0.48f, 0.20f, 0.26f, false);
+        assertEquals(CompositionMath.PanX.LEFT,
+                state.evaluate(true, edgeBand, false, Float.NaN, Float.NaN,
+                        null, CompositionMath.GridMode.OFF, 0).panX);
+
+        // 4. Face far to the RIGHT edge -> camera should pan RIGHT
+        state.reset();
+        CompositionMath.ActiveBox farRight =
+                new CompositionMath.ActiveBox(0.74f, 0.22f, 0.94f, 0.48f, 0.20f, 0.26f, false);
+        assertEquals(CompositionMath.PanX.RIGHT,
+                state.evaluate(true, farRight, false, Float.NaN, Float.NaN,
+                        null, CompositionMath.GridMode.OFF, 0).panX);
+
+        // 5. Tight headroom at top -> camera should tilt UP
+        state.reset();
+        CompositionMath.ActiveBox tightHead =
+                new CompositionMath.ActiveBox(0.38f, 0.04f, 0.62f, 0.30f, 0.24f, 0.26f, false);
+        assertEquals(CompositionMath.PanY.UP,
+                state.evaluate(true, tightHead, false, Float.NaN, Float.NaN,
+                        null, CompositionMath.GridMode.OFF, 0).panY);
+
+        // 6. Portrait too close -> BACK depth cue and suppressed noisy vertical tilt
+        state.reset();
+        CompositionMath.ActiveBox tooClose =
+                new CompositionMath.ActiveBox(0.25f, 0.02f, 0.75f, 0.60f, 0.50f, 0.58f, true);
+        CompositionMath.MoveCue backCue = state.evaluate(
+                true, tooClose, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0);
+        assertEquals(CompositionMath.DepthMove.BACK, backCue.depth);
+        assertEquals(CompositionMath.PanY.NONE, backCue.panY);
+
+        // 7. Tiny isolated subject (high saliency confidence + compact spread) -> CLOSER depth cue
+        state.reset();
+        PreviewStats smallSubject = new PreviewStats(
+                32, 24, 0.45f, 0.01f, 0.05f, 0.45f, 0.45f,
+                0.45f, 0.45f, 0.45f, 0.2f,
+                0.5f, 0.5f, 0.55f, null, 0.09f, 0.02f);
+        CompositionMath.MoveCue closerCue = state.evaluate(
+                false, null, false, Float.NaN, Float.NaN,
+                smallSubject, CompositionMath.GridMode.OFF, 0);
+        assertEquals(CompositionMath.DepthMove.CLOSER, closerCue.depth);
+
+        // 8. Portrait with THIRDS grid prefers upper power point (y=1/3), never pulling portrait down to y=2/3
+        state.reset();
+        CompositionMath.ActiveBox lowPortrait =
+                new CompositionMath.ActiveBox(0.24f, 0.46f, 0.42f, 0.68f, 0.18f, 0.22f, false);
+        CompositionMath.MoveCue thirdsPortrait = state.evaluate(
+                true, lowPortrait, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.THIRDS, 0);
+        assertEquals(CompositionMath.PanY.DOWN, thirdsPortrait.panY);
+    }
 }

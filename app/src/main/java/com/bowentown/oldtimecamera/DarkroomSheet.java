@@ -108,6 +108,10 @@ public final class DarkroomSheet {
         }, false);
 
         LinearLayout assistContainer = dialog.findViewById(R.id.assistToggleContainer);
+        addToggle(context, assistContainer, R.string.assist_move_guide, prefs.isAssistMoveGuide(), enabled -> {
+            prefs.setAssistMoveGuide(enabled);
+            callbacks.onAssistSettingsChanged();
+        }, true);
         addToggle(context, assistContainer, R.string.assist_exposure, prefs.isAssistExposure(), enabled -> {
             prefs.setAssistExposure(enabled);
             callbacks.onAssistSettingsChanged();

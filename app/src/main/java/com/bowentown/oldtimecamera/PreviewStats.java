@@ -23,6 +23,8 @@ public final class PreviewStats {
     public final float saliencyX;
     public final float saliencyY;
     public final float saliencyConfidence;
+    public final float saliencySpread;
+    public final float borderEdgeRatio;
     public final float[] lumaBins;
 
     public PreviewStats(
@@ -41,7 +43,8 @@ public final class PreviewStats {
             float saliencyY,
             float saliencyConfidence) {
         this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
-                avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence, null);
+                avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence, null,
+                0.25f, 0f);
     }
 
     public PreviewStats(
@@ -60,6 +63,29 @@ public final class PreviewStats {
             float saliencyY,
             float saliencyConfidence,
             float[] lumaBins) {
+        this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
+                avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence,
+                lumaBins, 0.25f, 0f);
+    }
+
+    public PreviewStats(
+            int width,
+            int height,
+            float meanLuma,
+            float clippedHighlights,
+            float crushedShadows,
+            float centerLuma,
+            float borderLuma,
+            float avgR,
+            float avgG,
+            float avgB,
+            float meanSaturation,
+            float saliencyX,
+            float saliencyY,
+            float saliencyConfidence,
+            float[] lumaBins,
+            float saliencySpread,
+            float borderEdgeRatio) {
         this.width = width;
         this.height = height;
         this.meanLuma = clamp01(meanLuma);
@@ -74,6 +100,8 @@ public final class PreviewStats {
         this.saliencyX = clamp01(saliencyX);
         this.saliencyY = clamp01(saliencyY);
         this.saliencyConfidence = clamp01(saliencyConfidence);
+        this.saliencySpread = clamp01(saliencySpread);
+        this.borderEdgeRatio = clamp01(borderEdgeRatio);
         float[] bins = new float[LUMA_BIN_COUNT];
         if (lumaBins != null) {
             int copy = Math.min(LUMA_BIN_COUNT, lumaBins.length);
@@ -155,10 +183,13 @@ public final class PreviewStats {
             }
         }
 
-        // Compute luminance-gradient saliency centroid in top-left normalized space.
+        // Compute luminance-gradient saliency centroid and spatial spread in top-left normalized space.
         double weightSum = 0.0;
         double wxSum = 0.0;
         double wySum = 0.0;
+        double wx2Sum = 0.0;
+        double wy2Sum = 0.0;
+        double borderWeightSum = 0.0;
         for (int y = 0; y < height; y++) {
             int ym = Math.max(0, y - 1);
             int yp = Math.min(height - 1, y + 1);
@@ -179,6 +210,11 @@ public final class PreviewStats {
                     weightSum += w;
                     wxSum += nx * w;
                     wySum += ny * w;
+                    wx2Sum += nx * nx * w;
+                    wy2Sum += ny * ny * w;
+                    if (nx < 0.12f || nx > 0.88f || ny < 0.12f || ny > 0.88f) {
+                        borderWeightSum += w;
+                    }
                 }
             }
         }
@@ -186,10 +222,16 @@ public final class PreviewStats {
         float salX = 0.5f;
         float salY = 0.5f;
         float salConf = 0f;
+        float salSpread = 0.25f;
+        float borderEdges = 0f;
         if (weightSum > 1e-4) {
             salX = (float) (wxSum / weightSum);
             salY = (float) (wySum / weightSum);
             salConf = clamp01((float) (weightSum / (n * 0.025)));
+            double varX = Math.max(0.0, (wx2Sum / weightSum) - (salX * salX));
+            double varY = Math.max(0.0, (wy2Sum / weightSum) - (salY * salY));
+            salSpread = clamp01((float) Math.sqrt(varX + varY));
+            borderEdges = clamp01((float) (borderWeightSum / weightSum));
         }
 
         float meanL = (float) (sumL / n);
@@ -217,7 +259,9 @@ public final class PreviewStats {
                 salX,
                 salY,
                 salConf,
-                bins
+                bins,
+                salSpread,
+                borderEdges
         );
     }
 

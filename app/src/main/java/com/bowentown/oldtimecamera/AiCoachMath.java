@@ -205,6 +205,14 @@ public final class AiCoachMath {
             PreviewStats stats, float tiltDeg, String presetId, String presetName,
             float currentEvStops, String aspectLabel, boolean facingFront,
             boolean withImage, boolean zh) {
+        return buildViewfinderUserContext(stats, tiltDeg, presetId, presetName,
+                currentEvStops, aspectLabel, facingFront, withImage, zh, null);
+    }
+
+    public static String buildViewfinderUserContext(
+            PreviewStats stats, float tiltDeg, String presetId, String presetName,
+            float currentEvStops, String aspectLabel, boolean facingFront,
+            boolean withImage, boolean zh, CompositionMath.MoveCue liveCue) {
         StringBuilder sb = new StringBuilder();
         sb.append(withImage
                 ? (zh ? "请诊断这张当前取景画面，并给出可立刻执行的拍摄调整。" : "Diagnose this live viewfinder frame and give concrete adjustment steps.")
@@ -218,6 +226,11 @@ public final class AiCoachMath {
                     "\nMetering: luma=%.2f highlightClip=%.0f%% shadowCrush=%.0f%% centerLuma=%.2f edgeLuma=%.2f needle=%+.1fEV",
                     stats.meanLuma, stats.clippedHighlights * 100f, stats.crushedShadows * 100f,
                     stats.centerLuma, stats.borderLuma, FilmRenderMath.meterNeedleStops(stats)));
+        }
+        if (liveCue != null && !liveCue.isEmpty()) {
+            sb.append("\nLiveFramingHint: panX=").append(liveCue.panX)
+                    .append(" panY=").append(liveCue.panY)
+                    .append(" depth=").append(liveCue.depth);
         }
         if (Math.abs(tiltDeg) >= 1f) {
             sb.append(String.format(Locale.US, " tilt=%+.1fdeg", tiltDeg));

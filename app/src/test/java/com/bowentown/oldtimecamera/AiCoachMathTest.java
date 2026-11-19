@@ -135,10 +135,13 @@ public class AiCoachMathTest {
         PreviewStats stats = new PreviewStats(32, 24, 0.52f, 0.04f, 0.05f, 0.50f, 0.48f,
                 0.5f, 0.5f, 0.5f, 0.25f, 0.5f, 0.5f, 0.5f);
         String ctx = AiCoachMath.buildViewfinderUserContext(
-                stats, -2.5f, "warm400", "暖肤 400", -0.3f, "3:4", true, true, true);
+                stats, -2.5f, "warm400", "暖肤 400", -0.3f, "3:4", true, true, true,
+                new CompositionMath.MoveCue(CompositionMath.PanX.LEFT, CompositionMath.PanY.NONE,
+                        CompositionMath.DepthMove.BACK, 0.5f, 0f));
         assertTrue(ctx.contains("warm400"));
         assertTrue(ctx.contains("lens=front"));
         assertTrue(ctx.contains("needle="));
         assertTrue(ctx.contains("tilt="));
+        assertTrue(ctx.contains("LiveFramingHint: panX=LEFT"));
     }
 }

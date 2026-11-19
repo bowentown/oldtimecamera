@@ -153,6 +153,7 @@ public class MainActivity extends ComponentActivity {
     private boolean levelEnabled = false;
     private boolean shutterSoundEnabled = true;
     private volatile boolean frontMirrorEnabled = true;
+    private volatile boolean assistMoveGuide = true;
     private volatile boolean assistExposure = true;
     private volatile boolean assistSteadyShutter = true;
     private Bitmap doubleExposureFirstFrame = null;
@@ -177,6 +178,7 @@ public class MainActivity extends ComponentActivity {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final CompositionMath.SnapState snapState = new CompositionMath.SnapState();
+    private final CompositionMath.MoveGuideState moveGuideState = new CompositionMath.MoveGuideState();
     private final ExposureAdvisor exposureAdvisor = new ExposureAdvisor();
     private final StabilityMeter stabilityMeter = new StabilityMeter();
     private Sensor gyroSensor;
@@ -187,7 +189,10 @@ public class MainActivity extends ComponentActivity {
     private volatile Rect sensorActiveArray = null;
     private volatile float latestFrameScaleX = 1f, latestFrameScaleY = 1f;
     private volatile float lastFaceActiveX = Float.NaN, lastFaceActiveY = Float.NaN;
+    private volatile CompositionMath.ActiveBox lastFaceBox = null;
     private volatile long lastFaceActiveMs = 0L;
+    private volatile long lastFaceUiTickMs = 0L;
+    private volatile CompositionMath.MoveCue latestMoveCue = CompositionMath.MoveCue.EMPTY;
     private float lastTapSubjectX = Float.NaN, lastTapSubjectY = Float.NaN;
     private long lastTapSubjectMs = 0L;
     private final RectF latestFrameRect = new RectF();
@@ -262,6 +267,12 @@ public class MainActivity extends ComponentActivity {
     private final Runnable autoFadeExposureTask = () -> {
         exposureHintAutoFaded = true;
         refreshAssistHint();
+    };
+
+    private final Runnable faceMoveTickTask = () -> {
+        if (!isDestroyed() && !isFinishing()) {
+            refreshMoveGuide();
+        }
     };
 
     private final Runnable steadyTickTask = new Runnable() {
@@ -340,6 +351,7 @@ public class MainActivity extends ComponentActivity {
         levelEnabled = prefs.isLevelEnabled();
         shutterSoundEnabled = prefs.isShutterSoundEnabled();
         frontMirrorEnabled = prefs.isFrontMirrorEnabled();
+        assistMoveGuide = prefs.isAssistMoveGuide();
         assistExposure = prefs.isAssistExposure();
         assistSteadyShutter = prefs.isAssistSteadyShutter();
         timerSeconds = prefs.getTimerSeconds();
@@ -468,6 +480,7 @@ public class MainActivity extends ComponentActivity {
             boolean show = evPanel.getVisibility() != View.VISIBLE;
             closeBottomDrawers(show ? evPanel : null);
             evPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+            refreshMoveGuide();
         });
 
         gridPill.setOnClickListener(v -> {
@@ -729,6 +742,7 @@ public class MainActivity extends ComponentActivity {
         closeBottomDrawers(recipePanel);
         syncRecipeSlidersFromState();
         recipePanel.setVisibility(View.VISIBLE);
+        refreshMoveGuide();
         shutterButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
     }
 
@@ -781,6 +795,7 @@ public class MainActivity extends ComponentActivity {
                     FilmUiHelper.updateChipSelection(this, chips, selectedChipIndex);
                     FilmUiHelper.centerChip(filmStripScroll, chips.get(selectedChipIndex));
                     recipePanel.setVisibility(View.GONE);
+                    refreshMoveGuide();
                     Toast.makeText(this, getString(R.string.recipe_saved, name), Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton(R.string.cancel, null)
@@ -849,6 +864,7 @@ public class MainActivity extends ComponentActivity {
         if (except != null) {
             hideAiCoachCard();
         }
+        refreshMoveGuide();
     }
 
     private void updateViewfinderAspectRatio(boolean axisSwapped, boolean animate) {
@@ -872,8 +888,12 @@ public class MainActivity extends ComponentActivity {
         latestFrameScaleX = scales[0];
         latestFrameScaleY = scales[1];
         lastTapSubjectMs = 0L;
+        lastFaceBox = null;
+        lastFaceActiveMs = 0L;
+        moveGuideState.reset();
         previewView.setFrameScale(scales[0], scales[1]);
         viewfinderOverlay.setFrameScale(scales[0], scales[1], animate);
+        refreshMoveGuide();
     }
 
     private void updateStampPreview() {
@@ -915,7 +935,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void syncAssistSensorsAndTelemetry() {
-        boolean needTelemetry = assistExposure || gridMode != CompositionMath.GridMode.OFF;
+        boolean needTelemetry = assistExposure || assistMoveGuide || gridMode != CompositionMath.GridMode.OFF;
         previewView.setTelemetryEnabled(needTelemetry);
 
         if (!assistExposure) {
@@ -923,6 +943,11 @@ public class MainActivity extends ComponentActivity {
             lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
             exposureHintAutoFaded = false;
             mainHandler.removeCallbacks(autoFadeExposureTask);
+        }
+        if (!assistMoveGuide) {
+            moveGuideState.reset();
+            latestMoveCue = CompositionMath.MoveCue.EMPTY;
+            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", false);
         }
         if (gridMode == CompositionMath.GridMode.OFF) {
             snapState.reset();
@@ -953,6 +978,7 @@ public class MainActivity extends ComponentActivity {
             stabilityMeter.reset();
         }
         refreshAssistHint();
+        refreshMoveGuide();
     }
 
     private void updatePreviewRelativeSensorRotation(boolean front, int displayRotation) {
@@ -1043,6 +1069,47 @@ public class MainActivity extends ComponentActivity {
         }
 
         refreshAssistHint();
+        refreshMoveGuide();
+    }
+
+    private void refreshMoveGuide() {
+        if (viewfinderOverlay == null) return;
+        boolean suppressed = !assistMoveGuide
+                || !isActivityResumed
+                || capturing
+                || steadyWaiting
+                || activeTimer != null
+                || (permissionGate != null && permissionGate.getVisibility() == View.VISIBLE)
+                || (evPanel != null && evPanel.getVisibility() == View.VISIBLE)
+                || (recipePanel != null && recipePanel.getVisibility() == View.VISIBLE)
+                || (aiCoachCard != null && aiCoachCard.getVisibility() == View.VISIBLE);
+        boolean topReserved = assistHintPill != null
+                && (activeHintText != null || assistHintPill.getVisibility() == View.VISIBLE);
+        if (suppressed) {
+            moveGuideState.reset();
+            latestMoveCue = CompositionMath.MoveCue.EMPTY;
+            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", topReserved);
+            return;
+        }
+
+        long now = SystemClock.uptimeMillis();
+        CompositionMath.ActiveBox faceSnapshot = lastFaceBox;
+        boolean freshFace = faceSnapshot != null && (now - lastFaceActiveMs) <= FACE_STALE_MS;
+        boolean hasTap = (now - lastTapSubjectMs) <= TAP_SUBJECT_TTL_MS && !Float.isNaN(lastTapSubjectX);
+
+        CompositionMath.MoveCue cue = moveGuideState.evaluate(
+                freshFace, faceSnapshot,
+                hasTap, lastTapSubjectX, lastTapSubjectY,
+                latestStats, gridMode, goldenRotation);
+        latestMoveCue = cue;
+
+        String depthLabel = "";
+        if (cue.depth == CompositionMath.DepthMove.CLOSER) {
+            depthLabel = getString(R.string.move_cue_closer);
+        } else if (cue.depth == CompositionMath.DepthMove.BACK) {
+            depthLabel = getString(R.string.move_cue_back);
+        }
+        viewfinderOverlay.setMoveCue(cue, depthLabel, topReserved);
     }
 
     private void showTransientHint(int resId) {
@@ -1097,6 +1164,7 @@ public class MainActivity extends ComponentActivity {
                 assistHintPill.animate().alpha(0f).setDuration(180L).withEndAction(() -> {
                     if (activeHintText == null) {
                         assistHintPill.setVisibility(View.GONE);
+                        viewfinderOverlay.setTopCenterReserved(false);
                     }
                 }).start();
             }
@@ -1107,6 +1175,7 @@ public class MainActivity extends ComponentActivity {
         activeHintText = nextText;
         activeHintClickable = clickable;
         assistHintPill.setClickable(clickable);
+        viewfinderOverlay.setTopCenterReserved(true);
         if (!same) {
             assistHintPill.setText(nextText);
             assistHintPill.setTextColor(getColor(
@@ -1141,6 +1210,7 @@ public class MainActivity extends ComponentActivity {
                 : 0f;
         final String aspectLabel = aspectRatio.label;
         final boolean frontSnapshot = facingFront;
+        final CompositionMath.MoveCue cueSnapshot = latestMoveCue;
         final boolean zh = isChineseLocale();
         final boolean wantVision = prefs.isAiVisionEnabled();
 
@@ -1154,7 +1224,8 @@ public class MainActivity extends ComponentActivity {
                 }
                 advice = AiCoachClient.adviseViewfinder(
                         this, prefs, snapshot, statsSnapshot, tiltSnapshot,
-                        presetId, presetName, currentEvStops, aspectLabel, frontSnapshot, zh);
+                        presetId, presetName, currentEvStops, aspectLabel, frontSnapshot, zh,
+                        cueSnapshot);
             } catch (Exception e) {
                 err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             } finally {
@@ -1188,6 +1259,7 @@ public class MainActivity extends ComponentActivity {
         pendingAiAdvice = null;
         bottomDeck.setVisibility(View.INVISIBLE);
         aiCoachCard.setVisibility(View.VISIBLE);
+        refreshMoveGuide();
         aiCoachDiag.setText(R.string.ai_coach_thinking);
         aiCoachDiag.setTextColor(getColor(R.color.paper_dim));
         aiCoachDiag.setVisibility(View.VISIBLE);
@@ -1239,6 +1311,7 @@ public class MainActivity extends ComponentActivity {
         pendingAiAdvice = null;
         if (aiCoachCard != null) aiCoachCard.setVisibility(View.GONE);
         if (bottomDeck != null) bottomDeck.setVisibility(View.VISIBLE);
+        refreshMoveGuide();
     }
 
     private void applyPendingAiAdvice() {
@@ -1447,7 +1520,9 @@ public class MainActivity extends ComponentActivity {
         lastFaceActiveMs = 0L;
         lastFaceActiveX = Float.NaN;
         lastFaceActiveY = Float.NaN;
+        lastFaceBox = null;
         lastTapSubjectMs = 0L;
+        moveGuideState.reset();
         snapState.reset();
         viewfinderOverlay.setPowerPointHighlight(-1);
         exposureAdvisor.reset();
@@ -1455,6 +1530,7 @@ public class MainActivity extends ComponentActivity {
         exposureHintAutoFaded = false;
         mainHandler.removeCallbacks(autoFadeExposureTask);
         refreshAssistHint();
+        refreshMoveGuide();
 
         facingFront = !facingFront;
         SurfaceTexture st = previewView.getSurfaceTexture();
@@ -1526,6 +1602,7 @@ public class MainActivity extends ComponentActivity {
 
             @Override
             public void onAssistSettingsChanged() {
+                assistMoveGuide = prefs.isAssistMoveGuide();
                 assistExposure = prefs.isAssistExposure();
                 assistSteadyShutter = prefs.isAssistSteadyShutter();
                 syncAssistSensorsAndTelemetry();
@@ -1572,9 +1649,12 @@ public class MainActivity extends ComponentActivity {
         prefs.setManualRotation(manualRotation);
         lastTapSubjectMs = 0L;
         lastFaceActiveMs = 0L;
+        lastFaceBox = null;
+        moveGuideState.reset();
         snapState.reset();
         viewfinderOverlay.setPowerPointHighlight(-1);
         pushPreviewTransform();
+        refreshMoveGuide();
     }
 
     private void pushPreviewTransform() {
@@ -1820,7 +1900,8 @@ public class MainActivity extends ComponentActivity {
                                             @NonNull CaptureRequest request,
                                             @NonNull TotalCaptureResult result) {
                                         if (gen != bindGeneration.get()
-                                                || (!assistExposure && gridMode == CompositionMath.GridMode.OFF)) {
+                                                || (!assistExposure && !assistMoveGuide
+                                                && gridMode == CompositionMath.GridMode.OFF)) {
                                             return;
                                         }
                                         handleCamera2Faces(result, wantFront);
@@ -1863,6 +1944,7 @@ public class MainActivity extends ComponentActivity {
         Face[] faces = result.get(CaptureResult.STATISTICS_FACES);
         if (faces == null || faces.length == 0) {
             lastFaceActiveMs = 0L;
+            lastFaceBox = null;
             return;
         }
         Rect crop = result.get(CaptureResult.SCALER_CROP_REGION);
@@ -1874,46 +1956,57 @@ public class MainActivity extends ComponentActivity {
         }
         Face best = null;
         long bestArea = -1L;
-        float sx = 0f;
-        float sy = 0f;
         for (Face f : faces) {
             Rect b = f.getBounds();
             if (b == null) continue;
             float cx = (b.centerX() - crop.left) / (float) crop.width();
             float cy = (b.centerY() - crop.top) / (float) crop.height();
-            if (cx < 0f || cx > 1f || cy < 0f || cy > 1f) {
+            if (cx < -0.15f || cx > 1.15f || cy < -0.15f || cy > 1.15f) {
                 continue;
             }
             long area = (long) Math.max(0, b.width()) * Math.max(0, b.height());
             if (area > bestArea) {
                 bestArea = area;
                 best = f;
-                sx = cx;
-                sy = cy;
             }
         }
         if (best == null) {
             lastFaceActiveMs = 0L;
+            lastFaceBox = null;
             return;
         }
+        Rect b = best.getBounds();
+        float sL = (b.left - crop.left) / (float) crop.width();
+        float sT = (b.top - crop.top) / (float) crop.height();
+        float sR = (b.right - crop.left) / (float) crop.width();
+        float sB = (b.bottom - crop.top) / (float) crop.height();
+
         int manualOff = manualRotation >= 0 ? manualRotation : 0;
         boolean baseMirrored = latestInfoMirroring;
         boolean extraMirror = lensFront && !frontMirrorEnabled;
-        float[] activePt = CompositionMath.mapSensorPointToActiveFrame(
-                sx, sy,
+        CompositionMath.ActiveBox activeBox = CompositionMath.mapSensorBoxToActiveFrame(
+                sL, sT, sR, sB,
                 latestCropL, latestCropT, latestCropR, latestCropB,
                 previewRelativeSensorRotation,
                 baseMirrored,
                 manualOff,
                 extraMirror,
                 latestFrameScaleX, latestFrameScaleY);
-        if (activePt == null) {
+        if (activeBox == null) {
             lastFaceActiveMs = 0L;
+            lastFaceBox = null;
             return;
         }
-        lastFaceActiveX = activePt[0];
-        lastFaceActiveY = activePt[1];
-        lastFaceActiveMs = SystemClock.uptimeMillis();
+        lastFaceBox = activeBox;
+        lastFaceActiveX = activeBox.centerX();
+        lastFaceActiveY = activeBox.centerY();
+        long now = SystemClock.uptimeMillis();
+        lastFaceActiveMs = now;
+        if (assistMoveGuide && now - lastFaceUiTickMs >= 95L) {
+            lastFaceUiTickMs = now;
+            mainHandler.removeCallbacks(faceMoveTickTask);
+            mainHandler.post(faceMoveTickTask);
+        }
     }
 
     // CameraX 1.3.4 marks TransformationInfo#hasCameraTransform() and #getMirroring() @RestrictTo(LIBRARY_GROUP)
@@ -2027,6 +2120,7 @@ public class MainActivity extends ComponentActivity {
                 requestCaptureWithSteadyCheck();
             }
         }.start();
+        refreshMoveGuide();
     }
 
     private void cancelCountdown() {
@@ -2036,6 +2130,7 @@ public class MainActivity extends ComponentActivity {
         }
         countdownText.setVisibility(View.GONE);
         refreshAssistHint();
+        refreshMoveGuide();
     }
 
     private void requestCaptureWithSteadyCheck() {
@@ -2047,6 +2142,7 @@ public class MainActivity extends ComponentActivity {
             shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
             shutterProgress.setWaitingProgress(true, 0.02f);
             refreshAssistHint();
+            refreshMoveGuide();
             mainHandler.removeCallbacks(steadyTickTask);
             mainHandler.postDelayed(steadyTickTask, 16L);
             return;
@@ -2063,6 +2159,7 @@ public class MainActivity extends ComponentActivity {
         }
         if (refreshUi) {
             refreshAssistHint();
+            refreshMoveGuide();
         }
     }
 
@@ -2093,6 +2190,7 @@ public class MainActivity extends ComponentActivity {
         if (capturing || imageCapture == null) return;
         capturing = true;
         refreshAssistHint();
+        refreshMoveGuide();
 
         shutterButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
         if (shutterSoundEnabled && shutterSound != null) {
@@ -2322,6 +2420,7 @@ public class MainActivity extends ComponentActivity {
                         runOnUiThread(() -> {
                             capturing = false;
                             refreshAssistHint();
+                            refreshMoveGuide();
                         });
                     }
                 }
@@ -2333,6 +2432,7 @@ public class MainActivity extends ComponentActivity {
                     if (usedScreenFlash) endScreenFlash();
                     capturing = false;
                     refreshAssistHint();
+                    refreshMoveGuide();
                     Toast.makeText(MainActivity.this,
                             getString(R.string.capture_failed, String.valueOf(exception.getMessage())),
                             Toast.LENGTH_LONG).show();
@@ -2495,6 +2595,14 @@ public class MainActivity extends ComponentActivity {
         }
         mainHandler.removeCallbacks(clearTransientHintTask);
         mainHandler.removeCallbacks(autoFadeExposureTask);
+        mainHandler.removeCallbacks(faceMoveTickTask);
+        lastFaceBox = null;
+        lastFaceActiveMs = 0L;
+        moveGuideState.reset();
+        latestMoveCue = CompositionMath.MoveCue.EMPTY;
+        if (viewfinderOverlay != null) {
+            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", false);
+        }
         aiCoachGen.incrementAndGet();
         aiCoachBusy = false;
         hideAiCoachCard();
