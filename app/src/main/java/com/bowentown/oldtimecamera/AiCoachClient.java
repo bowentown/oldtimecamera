@@ -74,7 +74,7 @@ public final class AiCoachClient {
             Context context, CameraPrefs prefs, Bitmap previewBitmap,
             PreviewStats stats, float tiltDeg, String presetId, String presetName,
             float currentEvStops, String aspectLabel, boolean facingFront,
-            boolean zh, CompositionMath.MoveCue liveCue) throws Exception {
+            boolean zh, CompositionMath.Guide3DCue liveCue) throws Exception {
         Config cfg = readConfig(context, prefs);
         boolean useImage = cfg.visionEnabled && previewBitmap != null && !previewBitmap.isRecycled();
         String jpegDataUrl = useImage ? encodeScaledDataUrl(previewBitmap, 640, 80) : null;
@@ -90,6 +90,29 @@ public final class AiCoachClient {
             throw new IllegalStateException(context.getString(R.string.ai_err_empty_reply));
         }
         return advice;
+    }
+
+    public static AiCoachMath.AiDirectorPlan directViewfinder(
+            Context context, CameraPrefs prefs, Bitmap previewBitmap,
+            PreviewStats stats, float tiltDeg, float elevationDeg,
+            String presetId, String presetName, float currentEvStops,
+            String aspectLabel, boolean facingFront, boolean hasFace,
+            boolean zh) throws Exception {
+        Config cfg = readConfig(context, prefs);
+        boolean useImage = cfg.visionEnabled && previewBitmap != null && !previewBitmap.isRecycled();
+        String jpegDataUrl = useImage ? encodeScaledDataUrl(previewBitmap, 640, 80) : null;
+        String userText = AiCoachMath.buildDirectorUserContext(
+                stats, tiltDeg, elevationDeg, presetId, presetName,
+                currentEvStops, aspectLabel, facingFront, hasFace, useImage, zh);
+        String reply = requestChatCompletion(
+                context, cfg.endpointUrl, cfg.apiKey, cfg.model,
+                AiCoachMath.buildDirectorSystemPrompt(zh),
+                userText, jpegDataUrl, 650, 0.3f);
+        AiCoachMath.AiDirectorPlan plan = AiCoachMath.parseDirectorPlan(reply, hasFace, zh);
+        if (plan == null || plan.isEmpty()) {
+            throw new IllegalStateException(context.getString(R.string.ai_err_empty_reply));
+        }
+        return plan;
     }
 
     public static AiCoachMath.AiAdvice reviewPrint(

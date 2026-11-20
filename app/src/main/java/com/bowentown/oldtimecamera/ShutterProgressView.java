@@ -19,6 +19,7 @@ public final class ShutterProgressView extends View {
     private final float strokePx;
     private float progress = 0f;
     private boolean active = false;
+    private boolean readyLocked = false;
 
     public ShutterProgressView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -46,6 +47,13 @@ public final class ShutterProgressView extends View {
         invalidate();
     }
 
+    public void setReadyLocked(boolean locked) {
+        if (this.readyLocked != locked) {
+            this.readyLocked = locked;
+            invalidate();
+        }
+    }
+
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
@@ -56,9 +64,14 @@ public final class ShutterProgressView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (!active || arcBounds.width() <= 0f) return;
-        float sweep = Math.max(12f, progress * 360f);
-        canvas.drawArc(arcBounds, -90f, sweep, false, glowPaint);
-        canvas.drawArc(arcBounds, -90f, sweep, false, arcPaint);
+        if (arcBounds.width() <= 0f) return;
+        if (active) {
+            float sweep = Math.max(12f, progress * 360f);
+            canvas.drawArc(arcBounds, -90f, sweep, false, glowPaint);
+            canvas.drawArc(arcBounds, -90f, sweep, false, arcPaint);
+        } else if (readyLocked) {
+            canvas.drawArc(arcBounds, -90f, 360f, false, glowPaint);
+            canvas.drawArc(arcBounds, -90f, 360f, false, arcPaint);
+        }
     }
 }

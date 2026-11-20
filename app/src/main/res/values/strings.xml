@@ -76,8 +76,15 @@
     <string name="assist_exposure">曝光轻提示</string>
     <string name="assist_steady_shutter">稳拍快门</string>
 
-    <string name="move_cue_closer">往前</string>
-    <string name="move_cue_back">往后</string>
+    <string name="step3d_closer">往前走</string>
+    <string name="step3d_back">往后退</string>
+    <string name="step3d_left">往左移</string>
+    <string name="step3d_right">往右移</string>
+    <string name="step3d_up">手机抬高</string>
+    <string name="step3d_down">手机放低</string>
+    <string name="step3d_tilt_away">上沿前倾</string>
+    <string name="step3d_tilt_toward">上沿内扣</string>
+    <string name="step3d_locked">已到位</string>
 
     <string name="hint_overexposed">太亮 · 下拉 EV</string>
     <string name="hint_underexposed">偏暗 · 上推 EV</string>
@@ -169,14 +176,12 @@
     <string name="ai_err_thinking_only">模型仅返回思考过程；DeepSeek 请用 deepseek-flash（已自动关思考）</string>
     <string name="ai_err_parse_recipe">未能解析配方参数，请重试</string>
 
-    <string name="ai_coach_title">AI 摄影导师</string>
-    <string name="ai_coach_thinking">AI 诊断取景中…</string>
+    <string name="ai_director_thinking">AI 勘景布光中…</string>
+    <string name="ai_director_locked">已到位 · 按快门</string>
+    <string name="ai_director_applied">已套用 %1$s</string>
     <string name="ai_coach_failed">AI 指导失败：%1$s</string>
-    <string name="ai_coach_refresh">重看</string>
     <string name="ai_coach_diag_label">诊断</string>
     <string name="ai_coach_act_label">改法</string>
-    <string name="ai_coach_apply_btn">一键套用：%1$s</string>
-    <string name="ai_coach_applied">已按 AI 建议调整相机参数</string>
 
     <string name="gallery_ai_critique">AI 点评</string>
     <string name="ai_critique_thinking">AI 看片复盘中…</string>

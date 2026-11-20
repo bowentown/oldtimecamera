@@ -76,8 +76,15 @@
     <string name="assist_exposure">Exposure Hint</string>
     <string name="assist_steady_shutter">Steady Shutter</string>
 
-    <string name="move_cue_closer">CLOSER</string>
-    <string name="move_cue_back">BACK</string>
+    <string name="step3d_closer">Step closer</string>
+    <string name="step3d_back">Step back</string>
+    <string name="step3d_left">Move left</string>
+    <string name="step3d_right">Move right</string>
+    <string name="step3d_up">Raise phone</string>
+    <string name="step3d_down">Lower phone</string>
+    <string name="step3d_tilt_away">Tilt top away</string>
+    <string name="step3d_tilt_toward">Tilt top back</string>
+    <string name="step3d_locked">Locked</string>
 
     <string name="hint_overexposed">Bright · EV -</string>
     <string name="hint_underexposed">Dark · EV +</string>
@@ -169,14 +176,12 @@
     <string name="ai_err_thinking_only">Model returned reasoning trace only; use deepseek-flash</string>
     <string name="ai_err_parse_recipe">Could not parse film recipe</string>
 
-    <string name="ai_coach_title">AI PHOTO COACH</string>
-    <string name="ai_coach_thinking">AI reading scene…</string>
+    <string name="ai_director_thinking">AI directing shot…</string>
+    <string name="ai_director_locked">Framed · Press shutter</string>
+    <string name="ai_director_applied">Applied %1$s</string>
     <string name="ai_coach_failed">AI coach failed: %1$s</string>
-    <string name="ai_coach_refresh">Retry</string>
     <string name="ai_coach_diag_label">NOTE</string>
     <string name="ai_coach_act_label">TRY</string>
-    <string name="ai_coach_apply_btn">Apply: %1$s</string>
-    <string name="ai_coach_applied">Applied AI camera suggestions</string>
 
     <string name="gallery_ai_critique">AI Critique</string>
     <string name="ai_critique_thinking">AI reviewing print…</string>

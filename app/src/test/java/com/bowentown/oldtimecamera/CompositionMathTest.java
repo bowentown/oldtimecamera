@@ -227,76 +227,185 @@ public class CompositionMathTest {
     @Test
     public void moveGuideState_guidesDirectionsAndDepthWithHysteresis() {
         CompositionMath.MoveGuideState state = new CompositionMath.MoveGuideState();
+        long t = 1_000L;
 
-        // 1. Centered, well-proportioned portrait with Grid OFF -> zero hints
+        // 1. Centered, well-proportioned portrait with Grid OFF & level camera -> zero hints
         CompositionMath.ActiveBox centeredPortrait =
                 new CompositionMath.ActiveBox(0.38f, 0.22f, 0.62f, 0.48f, 0.24f, 0.26f, false);
-        CompositionMath.MoveCue okCue = state.evaluate(
+        CompositionMath.Guide3DCue okCue = state.evaluate(
                 true, centeredPortrait, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.OFF, 0);
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
+        assertEquals(CompositionMath.Step3D.NONE, okCue.step);
         assertTrue(okCue.isEmpty());
 
-        // 2. Face far to the LEFT edge -> camera should pan LEFT
+        // 2. Face far to the LEFT edge -> camera should MOVE_LEFT
         state.reset();
         CompositionMath.ActiveBox farLeft =
                 new CompositionMath.ActiveBox(0.06f, 0.22f, 0.26f, 0.48f, 0.20f, 0.26f, false);
-        CompositionMath.MoveCue leftCue = state.evaluate(
+        CompositionMath.Guide3DCue leftCue = state.evaluate(
                 true, farLeft, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.OFF, 0);
-        assertEquals(CompositionMath.PanX.LEFT, leftCue.panX);
-        assertEquals(CompositionMath.PanY.NONE, leftCue.panY);
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
+        assertEquals(CompositionMath.Step3D.MOVE_LEFT, leftCue.step);
 
-        // 3. Hysteresis: moving slightly back inside [0.26 .. 0.31] stays LEFT without jitter
+        // 3. Hysteresis: moving slightly back inside [0.26 .. 0.31] stays MOVE_LEFT without jitter
         CompositionMath.ActiveBox edgeBand =
                 new CompositionMath.ActiveBox(0.18f, 0.22f, 0.38f, 0.48f, 0.20f, 0.26f, false);
-        assertEquals(CompositionMath.PanX.LEFT,
+        assertEquals(CompositionMath.Step3D.MOVE_LEFT,
                 state.evaluate(true, edgeBand, false, Float.NaN, Float.NaN,
-                        null, CompositionMath.GridMode.OFF, 0).panX);
+                        null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t + 150L).step);
 
-        // 4. Face far to the RIGHT edge -> camera should pan RIGHT
+        // 4. Face far to the RIGHT edge -> camera should MOVE_RIGHT
         state.reset();
         CompositionMath.ActiveBox farRight =
                 new CompositionMath.ActiveBox(0.74f, 0.22f, 0.94f, 0.48f, 0.20f, 0.26f, false);
-        assertEquals(CompositionMath.PanX.RIGHT,
+        assertEquals(CompositionMath.Step3D.MOVE_RIGHT,
                 state.evaluate(true, farRight, false, Float.NaN, Float.NaN,
-                        null, CompositionMath.GridMode.OFF, 0).panX);
+                        null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t).step);
 
-        // 5. Tight headroom at top -> camera should tilt UP
+        // 5. Tight headroom at top -> camera should MOVE_UP
         state.reset();
         CompositionMath.ActiveBox tightHead =
                 new CompositionMath.ActiveBox(0.38f, 0.04f, 0.62f, 0.30f, 0.24f, 0.26f, false);
-        assertEquals(CompositionMath.PanY.UP,
+        assertEquals(CompositionMath.Step3D.MOVE_UP,
                 state.evaluate(true, tightHead, false, Float.NaN, Float.NaN,
-                        null, CompositionMath.GridMode.OFF, 0).panY);
+                        null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t).step);
 
-        // 6. Portrait too close -> BACK depth cue and suppressed noisy vertical tilt
+        // 6. Portrait too close -> Depth STEP_BACK wins priority over translation
         state.reset();
         CompositionMath.ActiveBox tooClose =
                 new CompositionMath.ActiveBox(0.25f, 0.02f, 0.75f, 0.60f, 0.50f, 0.58f, true);
-        CompositionMath.MoveCue backCue = state.evaluate(
+        CompositionMath.Guide3DCue backCue = state.evaluate(
                 true, tooClose, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.OFF, 0);
-        assertEquals(CompositionMath.DepthMove.BACK, backCue.depth);
-        assertEquals(CompositionMath.PanY.NONE, backCue.panY);
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
+        assertEquals(CompositionMath.Step3D.STEP_BACK, backCue.step);
 
-        // 7. Tiny isolated subject (high saliency confidence + compact spread) -> CLOSER depth cue
+        // 7. Tiny isolated subject (high saliency confidence + compact spread) -> STEP_CLOSER
         state.reset();
         PreviewStats smallSubject = new PreviewStats(
                 32, 24, 0.45f, 0.01f, 0.05f, 0.45f, 0.45f,
                 0.45f, 0.45f, 0.45f, 0.2f,
                 0.5f, 0.5f, 0.55f, null, 0.09f, 0.02f);
-        CompositionMath.MoveCue closerCue = state.evaluate(
+        CompositionMath.Guide3DCue closerCue = state.evaluate(
                 false, null, false, Float.NaN, Float.NaN,
-                smallSubject, CompositionMath.GridMode.OFF, 0);
-        assertEquals(CompositionMath.DepthMove.CLOSER, closerCue.depth);
+                smallSubject, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
+        assertEquals(CompositionMath.Step3D.STEP_CLOSER, closerCue.step);
 
-        // 8. Portrait with THIRDS grid prefers upper power point (y=1/3), never pulling portrait down to y=2/3
+        // 8. Normal confirmation: guiding >= 280ms then converging to centered frame -> LOCKED -> auto-hide
+        state.reset();
+        state.evaluate(true, farLeft, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_000L);
+        state.evaluate(true, farLeft, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_320L);
+        CompositionMath.Guide3DCue confirmCue = CompositionMath.Guide3DCue.EMPTY;
+        for (int i = 1; i <= 6; i++) {
+            confirmCue = state.evaluate(
+                    true, centeredPortrait, false, Float.NaN, Float.NaN,
+                    null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_320L + i * 60L);
+        }
+        assertEquals(CompositionMath.Step3D.LOCKED, confirmCue.step);
+        CompositionMath.Guide3DCue fadedCue = state.evaluate(
+                true, centeredPortrait, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 2_500L);
+        assertEquals(CompositionMath.Step3D.NONE, fadedCue.step);
+
+        // 9. Portrait with THIRDS grid prefers upper power point (y=1/3) -> MOVE_DOWN when low
         state.reset();
         CompositionMath.ActiveBox lowPortrait =
                 new CompositionMath.ActiveBox(0.24f, 0.46f, 0.42f, 0.68f, 0.18f, 0.22f, false);
-        CompositionMath.MoveCue thirdsPortrait = state.evaluate(
+        CompositionMath.Guide3DCue thirdsPortrait = state.evaluate(
                 true, lowPortrait, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.THIRDS, 0);
-        assertEquals(CompositionMath.PanY.DOWN, thirdsPortrait.panY);
+                null, CompositionMath.GridMode.THIRDS, 0, 0f, false, null, t);
+        assertEquals(CompositionMath.Step3D.MOVE_DOWN, thirdsPortrait.step);
+    }
+
+    @Test
+    public void elevationAndHandTilt_respectFrontVsRearLensGeometry() {
+        // Upright phone (0, 9.81, 0): both lenses level at ~0 deg
+        assertEquals(0f, CompositionMath.computeCameraElevationDegrees(0f, 9.81f, 0f, false), 0.1f);
+        assertEquals(0f, CompositionMath.computeCameraElevationDegrees(0f, 9.81f, 0f, true), 0.1f);
+
+        // Leaning phone top away from user -> gz > 0 -> rear points down (-30deg), front points up (+30deg)
+        float gzPos = 4.905f;
+        float gyPos = (float) Math.sqrt(9.81f * 9.81f - gzPos * gzPos);
+        assertEquals(-30f, CompositionMath.computeCameraElevationDegrees(0f, gyPos, gzPos, false), 0.5f);
+        assertEquals(30f, CompositionMath.computeCameraElevationDegrees(0f, gyPos, gzPos, true), 0.5f);
+
+        // Rear camera pointing too high (+15deg, need -6deg): lean top AWAY
+        assertEquals(CompositionMath.Step3D.TILT_TOP_AWAY,
+                CompositionMath.computeHandTiltStep(15f, -6f, false));
+        // Front selfie camera pointing too high (+15deg, need -6deg): pull top TOWARD user
+        assertEquals(CompositionMath.Step3D.TILT_TOP_TOWARD,
+                CompositionMath.computeHandTiltStep(15f, -6f, true));
+    }
+
+    @Test
+    public void projection3D_producesExpectedPerspectiveForeshorteningAndScaling() {
+        float[] p0 = new float[8];
+        float[] p1 = new float[8];
+        CompositionMath.Pose3D[] closer =
+                CompositionMath.keyframesForStep(CompositionMath.Step3D.STEP_CLOSER, 1f);
+        CompositionMath.projectPhoneCorners(closer[0], 10f, 18f, 0f, 50f, p0);
+        CompositionMath.projectPhoneCorners(closer[1], 10f, 18f, 0f, 50f, p1);
+        float w0 = p0[2] - p0[0];
+        float w1 = p1[2] - p1[0];
+        assertTrue("STEP_CLOSER should shrink phone as it moves away into depth", w1 < w0);
+
+        float[] awayPts = new float[8];
+        CompositionMath.Pose3D tiltAway = new CompositionMath.Pose3D(0f, 0f, 0f, 35f, 0f);
+        CompositionMath.projectPhoneCorners(tiltAway, 10f, 18f, 0f, 50f, awayPts);
+        float topWidth = awayPts[2] - awayPts[0];
+        float botWidth = awayPts[4] - awayPts[6];
+        assertTrue("Tilting top away puts top edge deeper -> narrower topWidth than bottomWidth",
+                topWidth < botWidth);
+
+        for (CompositionMath.Step3D s : CompositionMath.Step3D.values()) {
+            CompositionMath.Pose3D[] kf = CompositionMath.keyframesForStep(s, 0.8f);
+            float[] out = new float[8];
+            CompositionMath.projectPhoneCorners(kf[0], 6f, 10f, -1.5f, 42f, out);
+            for (float v : out) {
+                assertFalse("NaN coordinate for " + s, Float.isNaN(v) || Float.isInfinite(v));
+            }
+        }
+    }
+
+    @Test
+    public void directorMode_guidesDepthPanPitchThenPersistentGoldLock() {
+        CompositionMath.MoveGuideState state = new CompositionMath.MoveGuideState();
+        CompositionMath.DirectorTarget target =
+                new CompositionMath.DirectorTarget(0.35f, 0.36f, 0.25f, -8f, true);
+        long t = 5_000L;
+
+        // Too small + off-center + wrong elevation -> STEP_CLOSER first
+        CompositionMath.ActiveBox smallFace =
+                new CompositionMath.ActiveBox(0.55f, 0.45f, 0.65f, 0.56f, 0.10f, 0.11f, false);
+        assertEquals(CompositionMath.Step3D.STEP_CLOSER, state.evaluate(
+                true, smallFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 12f, false, target, t).step);
+
+        // Right size, far to right of targetX=0.35 -> MOVE_RIGHT
+        state.reset();
+        CompositionMath.ActiveBox rightFace =
+                new CompositionMath.ActiveBox(0.55f, 0.24f, 0.71f, 0.49f, 0.16f, 0.25f, false);
+        assertEquals(CompositionMath.Step3D.MOVE_RIGHT, state.evaluate(
+                true, rightFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 12f, false, target, t).step);
+
+        // Centered on targetX/targetY & right size, wrong pitch (elev +12 vs target -8, rear) -> TILT_TOP_AWAY
+        state.reset();
+        CompositionMath.ActiveBox alignedFace =
+                new CompositionMath.ActiveBox(0.27f, 0.25f, 0.43f, 0.50f, 0.16f, 0.25f, false);
+        assertEquals(CompositionMath.Step3D.TILT_TOP_AWAY, state.evaluate(
+                true, alignedFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, 12f, false, target, t).step);
+
+        // Aligned in position, size, and elevation -> persistent LOCKED
+        state.reset();
+        CompositionMath.Guide3DCue lockedCue = state.evaluate(
+                true, alignedFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, -7f, false, target, t);
+        assertEquals(CompositionMath.Step3D.LOCKED, lockedCue.step);
+        assertTrue(lockedCue.directorActive);
+        assertTrue(lockedCue.locked);
+        assertTrue(lockedCue.targetBoxRight > lockedCue.targetBoxLeft);
     }
 }

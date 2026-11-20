@@ -127,21 +127,56 @@ public class AiCoachMathTest {
     @Test
     public void promptBuilders_includeAllStocksAndCameraContext() {
         String coachSys = AiCoachMath.buildViewfinderCoachSystemPrompt(true);
+        String directorSys = AiCoachMath.buildDirectorSystemPrompt(true);
         String recipeSys = AiCoachMath.buildRecipeSystemPrompt(true);
         for (FilmPreset p : FilmPresets.all()) {
             assertTrue("Missing preset id in coach: " + p.id, coachSys.contains(p.id));
+            assertTrue("Missing preset id in director: " + p.id, directorSys.contains(p.id));
             assertTrue("Missing preset id in recipe: " + p.id, recipeSys.contains(p.id));
         }
         PreviewStats stats = new PreviewStats(32, 24, 0.52f, 0.04f, 0.05f, 0.50f, 0.48f,
                 0.5f, 0.5f, 0.5f, 0.25f, 0.5f, 0.5f, 0.5f);
         String ctx = AiCoachMath.buildViewfinderUserContext(
                 stats, -2.5f, "warm400", "暖肤 400", -0.3f, "3:4", true, true, true,
-                new CompositionMath.MoveCue(CompositionMath.PanX.LEFT, CompositionMath.PanY.NONE,
-                        CompositionMath.DepthMove.BACK, 0.5f, 0f));
+                new CompositionMath.Guide3DCue(CompositionMath.Step3D.MOVE_LEFT, 0.5f, false, false,
+                        0.4f, 0.4f, 0f, 0f, 0f, 0f));
         assertTrue(ctx.contains("warm400"));
         assertTrue(ctx.contains("lens=front"));
         assertTrue(ctx.contains("needle="));
         assertTrue(ctx.contains("tilt="));
-        assertTrue(ctx.contains("LiveFramingHint: panX=LEFT"));
+        assertTrue(ctx.contains("LiveFramingStep: MOVE_LEFT"));
+
+        String dirCtx = AiCoachMath.buildDirectorUserContext(
+                stats, 1.5f, -6.0f, "warm400", "暖肤 400", -0.3f, "3:4", false, true, true, true);
+        assertTrue(dirCtx.contains("currentElev=-6.0deg"));
+        assertTrue(dirCtx.contains("hasFace=true"));
+    }
+
+    @Test
+    public void parseDirectorPlan_clampsGeometryAndHandlesFencesAndErrors() {
+        String fenced = "<think>hmm</think>\n```json\n"
+                + "{\"instruction\":\"左移两步避开右侧杂物，手机举高微俯拍\","
+                + "\"poseTip\":\"看镜头左侧微侧脸\","
+                + "\"targetX\":0.05,\"targetY\":0.92,\"targetSize\":0.80,"
+                + "\"targetElevationDeg\":-40.0,\"recommendedPresetId\":\"daylight200\",\"evDelta\":-3.0}"
+                + "\n```";
+        AiCoachMath.AiDirectorPlan plan = AiCoachMath.parseDirectorPlan(fenced, true, true);
+        assertNotNull(plan);
+        assertEquals("左移两步避开右侧杂物，手机举高微俯拍", plan.instruction);
+        assertEquals("看镜头左侧微侧脸", plan.poseTip);
+        assertEquals("左移两步避开右侧杂物，手机举高微俯拍 · 看镜头左侧微侧脸", plan.displayBannerText());
+        assertEquals("daylight200", plan.recommendedPresetId);
+        assertEquals(-2.0f, plan.evDelta, 0.01f);
+        assertEquals(0.15f, plan.target.targetX, 0.001f);
+        assertEquals(0.85f, plan.target.targetY, 0.001f);
+        assertEquals(0.58f, plan.target.targetSize, 0.001f);
+        assertEquals(-35.0f, plan.target.targetElevationDeg, 0.001f);
+
+        AiCoachMath.AiDirectorPlan plainFallback = AiCoachMath.parseDirectorPlan("站定往左走一步", false, true);
+        assertNotNull(plainFallback);
+        assertEquals("站定往左走一步", plainFallback.instruction);
+        assertEquals(0.50f, plainFallback.target.targetX, 0.001f);
+
+        assertNull(AiCoachMath.parseDirectorPlan("<think>reasoning only</think>", false, true));
     }
 }

@@ -94,6 +94,35 @@ public final class AiCoachMath {
         }
     }
 
+    /** Actionable AI Live Director plan pairing plain-language cue with a 3D target pose & frame. */
+    public static final class AiDirectorPlan {
+        public final String instruction;
+        public final String poseTip;
+        public final CompositionMath.DirectorTarget target;
+        public final String recommendedPresetId;
+        public final float evDelta;
+
+        public AiDirectorPlan(String instruction, String poseTip,
+                              CompositionMath.DirectorTarget target,
+                              String recommendedPresetId, float evDelta) {
+            this.instruction = cleanText(instruction, 48);
+            this.poseTip = cleanText(poseTip, 26);
+            this.target = target;
+            this.recommendedPresetId = resolveOptionalPresetId(recommendedPresetId);
+            this.evDelta = clampEv(evDelta);
+        }
+
+        public boolean isEmpty() {
+            return instruction.isEmpty() && target == null;
+        }
+
+        public String displayBannerText() {
+            if (instruction.isEmpty()) return poseTip;
+            if (poseTip.isEmpty()) return instruction;
+            return instruction + " · " + poseTip;
+        }
+    }
+
     private AiCoachMath() {}
 
     public static String normalizeEndpointUrl(String rawBaseUrl) {
@@ -212,7 +241,7 @@ public final class AiCoachMath {
     public static String buildViewfinderUserContext(
             PreviewStats stats, float tiltDeg, String presetId, String presetName,
             float currentEvStops, String aspectLabel, boolean facingFront,
-            boolean withImage, boolean zh, CompositionMath.MoveCue liveCue) {
+            boolean withImage, boolean zh, CompositionMath.Guide3DCue liveCue) {
         StringBuilder sb = new StringBuilder();
         sb.append(withImage
                 ? (zh ? "请诊断这张当前取景画面，并给出可立刻执行的拍摄调整。" : "Diagnose this live viewfinder frame and give concrete adjustment steps.")
@@ -227,13 +256,60 @@ public final class AiCoachMath {
                     stats.meanLuma, stats.clippedHighlights * 100f, stats.crushedShadows * 100f,
                     stats.centerLuma, stats.borderLuma, FilmRenderMath.meterNeedleStops(stats)));
         }
-        if (liveCue != null && !liveCue.isEmpty()) {
-            sb.append("\nLiveFramingHint: panX=").append(liveCue.panX)
-                    .append(" panY=").append(liveCue.panY)
-                    .append(" depth=").append(liveCue.depth);
+        if (liveCue != null && liveCue.step != CompositionMath.Step3D.NONE) {
+            sb.append("\nLiveFramingStep: ").append(liveCue.step.name());
         }
         if (Math.abs(tiltDeg) >= 1f) {
             sb.append(String.format(Locale.US, " tilt=%+.1fdeg", tiltDeg));
+        }
+        return sb.toString();
+    }
+
+    public static String buildDirectorSystemPrompt(boolean zh) {
+        if (zh) {
+            return "你是站在摄影小白身旁的实景领拍教练。看当前取景图，直接告诉他下一步去哪里拍、怎么拿手机，禁用「二分法/三分法/对比度/氛围感」等空洞摄影术语。"
+                    + "\n必须只输出严格 JSON（不要 markdown 代码块）："
+                    + "\n{\"instruction\":\"1句<=30字大白话：往哪挪避开什么背景或迎哪束光\",\"poseTip\":\"可选<=16字姿态眼神提示，无人像填空串\","
+                    + "\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
+                    + "\"recommendedPresetId\":\"更搭的胶片ID，不变填空串\",\"evDelta\":0.0}"
+                    + "\n参数说明："
+                    + "\n- targetX∈[0.25,0.75]: 主体在画面横向目标位置(0.5居中, 0.35/0.65避杂物);"
+                    + "\n- targetY∈[0.25,0.65]: 主体/人眼纵向目标位置(人像推荐0.35~0.40);"
+                    + "\n- targetSize∈[0.16,0.44]: 主体占画面高度比(日常半身约0.24~0.28, 太近要退就设0.22);"
+                    + "\n- targetElevationDeg∈[-25,+15]: 目标镜头仰俯角(0平视, -6~-10手机举高微俯显脸小, -18桌拍俯视, +6低角微仰);"
+                    + "\n- evDelta∈[-1.5,+1.5]; 可选胶片ID: " + stockCatalogText();
+        }
+        return "You are a hands-on shooting director standing next to a camera beginner. Look at the live frame and tell them in plain physical language what background distraction or lighting to fix—no photography jargon."
+                + "\nOutput ONLY raw JSON:"
+                + "\n{\"instruction\":\"<=18 words plain physical action (step direction / light direction)\",\"poseTip\":\"optional <=8 words pose cue or empty\","
+                + "\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
+                + "\"recommendedPresetId\":\"better stock ID or empty\",\"evDelta\":0.0}"
+                + "\nRanges: targetX[0.25..0.75], targetY[0.25..0.65], targetSize[0.16..0.44], targetElevationDeg[-25..+15] (negative=tilt down/higher phone), evDelta[-1.5..+1.5]. Stock IDs: "
+                + stockCatalogText();
+    }
+
+    public static String buildDirectorUserContext(
+            PreviewStats stats, float tiltDeg, float elevationDeg,
+            String presetId, String presetName, float currentEvStops,
+            String aspectLabel, boolean facingFront, boolean hasFace,
+            boolean withImage, boolean zh) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(withImage
+                ? (zh ? "请根据这张实时取景画面，规划本张最佳拍摄机位、目标落点和曝光/胶片。"
+                      : "Plan the best framing target, phone elevation angle, film stock, and EV for this live scene.")
+                : (zh ? "纯参数模式：请基于镜头与测光参数给出机位落点与角度建议。"
+                      : "Telemetry-only mode: output framing target and elevation plan."));
+        sb.append("\nCamera: lens=").append(facingFront ? "front" : "rear")
+                .append(" hasFace=").append(hasFace)
+                .append(" preset=").append(presetId).append('(').append(presetName).append(')')
+                .append(" aspect=").append(aspectLabel)
+                .append(String.format(Locale.US, " currentEV=%+.1f currentElev=%+.1fdeg tilt=%+.1fdeg",
+                        currentEvStops, elevationDeg, tiltDeg));
+        if (stats != null && stats.width > 0 && stats.height > 0) {
+            sb.append(String.format(Locale.US,
+                    "\nMetering: luma=%.2f clip=%.0f%% crush=%.0f%% center=%.2f border=%.2f needle=%+.1fEV",
+                    stats.meanLuma, stats.clippedHighlights * 100f, stats.crushedShadows * 100f,
+                    stats.centerLuma, stats.borderLuma, FilmRenderMath.meterNeedleStops(stats)));
         }
         return sb.toString();
     }
@@ -297,6 +373,51 @@ public final class AiCoachMath {
         String act = lines.size() > 1 ? lines.get(1)
                 : (zh ? "保持视线平齐略微侧转避开杂乱背景后再按快门" : "Step sideways for a cleaner background and keep lens at eye level");
         return new AiAdvice(diag, act, "", 0f, null);
+    }
+
+    public static AiDirectorPlan parseDirectorPlan(String raw, boolean hasFace, boolean zh) {
+        String cleaned = stripThinkingAndFences(raw);
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        float defX = 0.50f;
+        float defY = hasFace ? 0.36f : 0.50f;
+        float defSize = hasFace ? 0.26f : 0.28f;
+        float defElev = hasFace ? -5.0f : 0.0f;
+
+        String jsonObj = extractFirstJsonObject(cleaned);
+        if (!jsonObj.isEmpty()) {
+            Map<String, String> map = parseFlatJsonObject(jsonObj);
+            String inst = firstNonEmpty(map, "instruction", "action", "tip", "advice");
+            String pose = firstNonEmpty(map, "poseTip", "pose", "look");
+            float tx = parseClampedFloat(firstNonEmpty(map, "targetX", "x"), defX, 0.15f, 0.85f);
+            float ty = parseClampedFloat(firstNonEmpty(map, "targetY", "y"), defY, 0.15f, 0.85f);
+            float tsize = parseClampedFloat(firstNonEmpty(map, "targetSize", "size"), defSize, 0.12f, 0.58f);
+            float telev = parseClampedFloat(
+                    firstNonEmpty(map, "targetElevationDeg", "elevationDeg", "pitchDeg", "targetPitch"),
+                    defElev, -35f, 35f);
+            String preset = firstNonEmpty(map, "recommendedPresetId", "presetId", "film");
+            float ev = parseClampedFloat(firstNonEmpty(map, "evDelta", "ev"), 0f, -2.0f, 2.0f);
+            if (inst.isEmpty() && !pose.isEmpty()) {
+                inst = pose;
+                pose = "";
+            }
+            if (!inst.isEmpty()) {
+                return new AiDirectorPlan(
+                        inst, pose,
+                        new CompositionMath.DirectorTarget(tx, ty, tsize, telev, true),
+                        preset, ev);
+            }
+        }
+
+        String fallbackLine = cleanText(cleaned.replace('\n', ' ').replaceAll("^[-*•0-9.、\\s]+", ""), 48);
+        if (fallbackLine.isEmpty()) {
+            return null;
+        }
+        return new AiDirectorPlan(
+                fallbackLine, "",
+                new CompositionMath.DirectorTarget(defX, defY, defSize, defElev, true),
+                "", 0f);
     }
 
     public static AiRecipeProposal parseRecipeProposal(String raw, String fallbackPresetId, boolean zh) {

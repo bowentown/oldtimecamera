@@ -115,8 +115,7 @@ public class MainActivity extends ComponentActivity {
     private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
     private TextView assistHintPill;
     private TextView recipePanelTitle, recipeIntensityVal, recipeGrainVal, recipeWarmthVal;
-    private LinearLayout recipePanel, bottomDeck, aiCoachCard;
-    private TextView aiCoachDiag, aiCoachAction, aiCoachApplyBtn;
+    private LinearLayout recipePanel;
     private ImageButton aiCoachButton;
     private ImageButton flashButton, gridPill, modePill;
     private ImageView timerIcon, thumbnail, thumbPlaceholder;
@@ -192,7 +191,7 @@ public class MainActivity extends ComponentActivity {
     private volatile CompositionMath.ActiveBox lastFaceBox = null;
     private volatile long lastFaceActiveMs = 0L;
     private volatile long lastFaceUiTickMs = 0L;
-    private volatile CompositionMath.MoveCue latestMoveCue = CompositionMath.MoveCue.EMPTY;
+    private volatile CompositionMath.Guide3DCue latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
     private float lastTapSubjectX = Float.NaN, lastTapSubjectY = Float.NaN;
     private long lastTapSubjectMs = 0L;
     private final RectF latestFrameRect = new RectF();
@@ -200,6 +199,8 @@ public class MainActivity extends ComponentActivity {
     private long lastStatsSubjectMs = 0L;
     private PreviewStats latestStats = null;
     private float latestTiltDeg = 0f;
+    private volatile float latestCameraElevationDeg = 0f;
+    private long lastPitchUiTickMs = 0L;
     private String activeHintText = null;
     private boolean activeHintClickable = false;
     private int transientHintRes = 0;
@@ -209,8 +210,10 @@ public class MainActivity extends ComponentActivity {
     private boolean syncingRecipeSliders = false;
     private String pendingAiRecipeName = "";
     private volatile boolean aiCoachBusy = false;
+    private volatile boolean aiDirectorThinking = false;
+    private volatile boolean lastLockedState = false;
     private final AtomicInteger aiCoachGen = new AtomicInteger(0);
-    private AiCoachMath.AiAdvice pendingAiAdvice = null;
+    private volatile AiCoachMath.AiDirectorPlan activeDirectorPlan = null;
 
     // Latest CameraX transform metadata + optional user manual calibration.
     private volatile int manualRotation = -1;
@@ -225,16 +228,33 @@ public class MainActivity extends ComponentActivity {
     private OrientationEventListener orientationListener;
     private SensorManager sensorManager;
     private Sensor accelerometer;
-    private float smoothGravityX = 0f, smoothGravityY = 9.81f;
+    private float smoothGravityX = 0f, smoothGravityY = 9.81f, smoothGravityZ = 0f;
     private final SensorEventListener levelSensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
-            if (!levelEnabled || event.values == null || event.values.length < 2) return;
+            boolean needPitch = assistMoveGuide || activeDirectorPlan != null;
+            if ((!levelEnabled && !needPitch) || event.values == null || event.values.length < 2) {
+                return;
+            }
             smoothGravityX = smoothGravityX * 0.82f + event.values[0] * 0.18f;
             smoothGravityY = smoothGravityY * 0.82f + event.values[1] * 0.18f;
+            if (event.values.length >= 3) {
+                smoothGravityZ = smoothGravityZ * 0.82f + event.values[2] * 0.18f;
+            }
             float tiltDeg = (float) Math.toDegrees(Math.atan2(-smoothGravityX, smoothGravityY));
             latestTiltDeg = tiltDeg;
-            viewfinderOverlay.setTiltDegrees(tiltDeg);
+            if (levelEnabled) {
+                viewfinderOverlay.setTiltDegrees(tiltDeg);
+            }
+            latestCameraElevationDeg = CompositionMath.computeCameraElevationDegrees(
+                    smoothGravityX, smoothGravityY, smoothGravityZ, facingFront);
+            if (needPitch) {
+                long now = SystemClock.uptimeMillis();
+                if (now - lastPitchUiTickMs >= 95L) {
+                    lastPitchUiTickMs = now;
+                    mainHandler.post(faceMoveTickTask);
+                }
+            }
         }
 
         @Override
@@ -382,11 +402,6 @@ public class MainActivity extends ComponentActivity {
         previewView = findViewById(R.id.preview);
         viewfinderOverlay = findViewById(R.id.viewfinderOverlay);
         aiCoachButton = findViewById(R.id.aiCoachButton);
-        bottomDeck = findViewById(R.id.bottomDeck);
-        aiCoachCard = findViewById(R.id.aiCoachCard);
-        aiCoachDiag = findViewById(R.id.aiCoachDiag);
-        aiCoachAction = findViewById(R.id.aiCoachAction);
-        aiCoachApplyBtn = findViewById(R.id.aiCoachApplyBtn);
         rollCounter = findViewById(R.id.rollCounter);
         dateStampPreview = findViewById(R.id.dateStamp);
         countdownText = findViewById(R.id.countdownText);
@@ -453,10 +468,7 @@ public class MainActivity extends ComponentActivity {
             applyAspectRatio(true);
         });
 
-        aiCoachButton.setOnClickListener(v -> triggerAiCoach());
-        findViewById(R.id.aiCoachRefreshBtn).setOnClickListener(v -> triggerAiCoach());
-        findViewById(R.id.aiCoachCloseBtn).setOnClickListener(v -> hideAiCoachCard());
-        aiCoachApplyBtn.setOnClickListener(v -> applyPendingAiAdvice());
+        aiCoachButton.setOnClickListener(v -> toggleAiDirector());
 
         dateStampPreview.setOnClickListener(v -> {
             dateMode = (dateMode == CameraPrefs.DateMode.TODAY)
@@ -513,7 +525,7 @@ public class MainActivity extends ComponentActivity {
             return true;
         });
 
-        assistHintPill.setOnClickListener(v -> applyExposureHint());
+        assistHintPill.setOnClickListener(v -> handleAssistHintClick());
         modePill.setOnClickListener(v -> cycleShootMode());
 
         wireRecipeSliders();
@@ -561,7 +573,6 @@ public class MainActivity extends ComponentActivity {
             @Override
             public void onTapFocus(float viewX, float viewY, int viewWidth, int viewHeight) {
                 closeBottomDrawers(null);
-                hideAiCoachCard();
                 triggerTapFocus(viewX, viewY, viewWidth, viewHeight);
             }
 
@@ -861,9 +872,6 @@ public class MainActivity extends ComponentActivity {
         if (recipePanel != except && recipePanel.getVisibility() == View.VISIBLE) {
             recipePanel.setVisibility(View.GONE);
         }
-        if (except != null) {
-            hideAiCoachCard();
-        }
         refreshMoveGuide();
     }
 
@@ -928,15 +936,17 @@ public class MainActivity extends ComponentActivity {
     private void syncLevelSensorRegistration() {
         if (sensorManager == null || accelerometer == null) return;
         sensorManager.unregisterListener(levelSensorListener);
-        if (levelEnabled && isActivityResumed) {
+        if (isActivityResumed && (levelEnabled || assistMoveGuide || activeDirectorPlan != null)) {
             sensorManager.registerListener(levelSensorListener, accelerometer,
                     SensorManager.SENSOR_DELAY_UI);
         }
     }
 
     private void syncAssistSensorsAndTelemetry() {
-        boolean needTelemetry = assistExposure || assistMoveGuide || gridMode != CompositionMath.GridMode.OFF;
+        boolean needTelemetry = assistExposure || assistMoveGuide || activeDirectorPlan != null
+                || gridMode != CompositionMath.GridMode.OFF;
         previewView.setTelemetryEnabled(needTelemetry);
+        syncLevelSensorRegistration();
 
         if (!assistExposure) {
             exposureAdvisor.reset();
@@ -944,10 +954,14 @@ public class MainActivity extends ComponentActivity {
             exposureHintAutoFaded = false;
             mainHandler.removeCallbacks(autoFadeExposureTask);
         }
-        if (!assistMoveGuide) {
+        if (!assistMoveGuide && activeDirectorPlan == null) {
             moveGuideState.reset();
-            latestMoveCue = CompositionMath.MoveCue.EMPTY;
-            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", false);
+            latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
+            lastLockedState = false;
+            if (shutterProgress != null) {
+                shutterProgress.setReadyLocked(false);
+            }
+            viewfinderOverlay.setGuide3DCue(CompositionMath.Guide3DCue.EMPTY, "");
         }
         if (gridMode == CompositionMath.GridMode.OFF) {
             snapState.reset();
@@ -1074,21 +1088,24 @@ public class MainActivity extends ComponentActivity {
 
     private void refreshMoveGuide() {
         if (viewfinderOverlay == null) return;
-        boolean suppressed = !assistMoveGuide
+        boolean guideEnabled = assistMoveGuide || activeDirectorPlan != null;
+        boolean suppressed = !guideEnabled
                 || !isActivityResumed
                 || capturing
                 || steadyWaiting
                 || activeTimer != null
+                || aiDirectorThinking
                 || (permissionGate != null && permissionGate.getVisibility() == View.VISIBLE)
                 || (evPanel != null && evPanel.getVisibility() == View.VISIBLE)
-                || (recipePanel != null && recipePanel.getVisibility() == View.VISIBLE)
-                || (aiCoachCard != null && aiCoachCard.getVisibility() == View.VISIBLE);
-        boolean topReserved = assistHintPill != null
-                && (activeHintText != null || assistHintPill.getVisibility() == View.VISIBLE);
+                || (recipePanel != null && recipePanel.getVisibility() == View.VISIBLE);
         if (suppressed) {
             moveGuideState.reset();
-            latestMoveCue = CompositionMath.MoveCue.EMPTY;
-            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", topReserved);
+            latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
+            lastLockedState = false;
+            if (shutterProgress != null) {
+                shutterProgress.setReadyLocked(false);
+            }
+            viewfinderOverlay.setGuide3DCue(CompositionMath.Guide3DCue.EMPTY, "");
             return;
         }
 
@@ -1096,20 +1113,46 @@ public class MainActivity extends ComponentActivity {
         CompositionMath.ActiveBox faceSnapshot = lastFaceBox;
         boolean freshFace = faceSnapshot != null && (now - lastFaceActiveMs) <= FACE_STALE_MS;
         boolean hasTap = (now - lastTapSubjectMs) <= TAP_SUBJECT_TTL_MS && !Float.isNaN(lastTapSubjectX);
+        AiCoachMath.AiDirectorPlan plan = activeDirectorPlan;
+        CompositionMath.DirectorTarget directorTarget = plan != null ? plan.target : null;
+        CompositionMath.Guide3DCue previous = latestGuideCue;
 
-        CompositionMath.MoveCue cue = moveGuideState.evaluate(
+        CompositionMath.Guide3DCue cue = moveGuideState.evaluate(
                 freshFace, faceSnapshot,
                 hasTap, lastTapSubjectX, lastTapSubjectY,
-                latestStats, gridMode, goldenRotation);
-        latestMoveCue = cue;
+                latestStats, gridMode, goldenRotation,
+                latestCameraElevationDeg, facingFront, directorTarget, now);
+        latestGuideCue = cue;
+        viewfinderOverlay.setGuide3DCue(cue, step3dLabel(cue.step));
 
-        String depthLabel = "";
-        if (cue.depth == CompositionMath.DepthMove.CLOSER) {
-            depthLabel = getString(R.string.move_cue_closer);
-        } else if (cue.depth == CompositionMath.DepthMove.BACK) {
-            depthLabel = getString(R.string.move_cue_back);
+        boolean directorLocked = cue.directorActive && cue.locked;
+        if (shutterProgress != null) {
+            shutterProgress.setReadyLocked(directorLocked);
         }
-        viewfinderOverlay.setMoveCue(cue, depthLabel, topReserved);
+        if (cue.step == CompositionMath.Step3D.LOCKED
+                && previous.step != CompositionMath.Step3D.LOCKED && !capturing) {
+            shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        }
+        if (directorLocked != lastLockedState) {
+            lastLockedState = directorLocked;
+            refreshAssistHint();
+        }
+    }
+
+    private String step3dLabel(CompositionMath.Step3D step) {
+        if (step == null) return "";
+        switch (step) {
+            case STEP_CLOSER: return getString(R.string.step3d_closer);
+            case STEP_BACK: return getString(R.string.step3d_back);
+            case MOVE_LEFT: return getString(R.string.step3d_left);
+            case MOVE_RIGHT: return getString(R.string.step3d_right);
+            case MOVE_UP: return getString(R.string.step3d_up);
+            case MOVE_DOWN: return getString(R.string.step3d_down);
+            case TILT_TOP_AWAY: return getString(R.string.step3d_tilt_away);
+            case TILT_TOP_TOWARD: return getString(R.string.step3d_tilt_toward);
+            case LOCKED: return getString(R.string.step3d_locked);
+            default: return "";
+        }
     }
 
     private void showTransientHint(int resId) {
@@ -1139,6 +1182,14 @@ public class MainActivity extends ComponentActivity {
             nextText = transientHintText;
         } else if (transientHintRes != 0 && now < transientHintUntilMs) {
             nextText = getString(transientHintRes);
+        } else if (aiDirectorThinking) {
+            nextText = getString(R.string.ai_director_thinking);
+        } else if (activeDirectorPlan != null && activeTimer == null && !capturing
+                && permissionGate.getVisibility() != View.VISIBLE) {
+            nextText = (lastLockedState
+                    ? getString(R.string.ai_director_locked)
+                    : activeDirectorPlan.displayBannerText()) + "  ×";
+            clickable = true;
         } else if (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null && !capturing) {
             nextText = getString(R.string.hint_half_first);
         } else if (activeTimer == null && !capturing
@@ -1164,7 +1215,6 @@ public class MainActivity extends ComponentActivity {
                 assistHintPill.animate().alpha(0f).setDuration(180L).withEndAction(() -> {
                     if (activeHintText == null) {
                         assistHintPill.setVisibility(View.GONE);
-                        viewfinderOverlay.setTopCenterReserved(false);
                     }
                 }).start();
             }
@@ -1175,12 +1225,11 @@ public class MainActivity extends ComponentActivity {
         activeHintText = nextText;
         activeHintClickable = clickable;
         assistHintPill.setClickable(clickable);
-        viewfinderOverlay.setTopCenterReserved(true);
+        boolean amberTint = steadyWaiting || aiDirectorThinking || activeDirectorPlan != null
+                || clickable || (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null);
         if (!same) {
             assistHintPill.setText(nextText);
-            assistHintPill.setTextColor(getColor(
-                    (steadyWaiting || clickable || (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null))
-                            ? R.color.amber_led : R.color.paper));
+            assistHintPill.setTextColor(getColor(amberTint ? R.color.amber_led : R.color.paper));
         }
         if (assistHintPill.getVisibility() != View.VISIBLE || assistHintPill.getAlpha() < 0.99f) {
             assistHintPill.animate().cancel();
@@ -1189,20 +1238,37 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private void triggerAiCoach() {
-        if (aiCoachBusy) return;
+    private void handleAssistHintClick() {
+        if (activeDirectorPlan != null) {
+            assistHintPill.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            clearDirectorPlan();
+            return;
+        }
+        applyExposureHint();
+    }
+
+    private void toggleAiDirector() {
+        if (aiCoachBusy || activeDirectorPlan != null) {
+            shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+            clearDirectorPlan();
+            return;
+        }
         if (!AiKeyStore.hasApiKey(this)) {
-            AiSettingsDialog.show(this, prefs, this::triggerAiCoach);
+            AiSettingsDialog.show(this, prefs, this::toggleAiDirector);
             return;
         }
         closeBottomDrawers(null);
         aiCoachBusy = true;
+        aiDirectorThinking = true;
+        lastLockedState = false;
         final int gen = aiCoachGen.incrementAndGet();
         aiCoachButton.setAlpha(0.45f);
-        showAiCoachThinking();
+        refreshAssistHint();
+        refreshMoveGuide();
 
         final PreviewStats statsSnapshot = latestStats;
         final float tiltSnapshot = latestTiltDeg;
+        final float elevSnapshot = latestCameraElevationDeg;
         final String presetId = presets[currentPreset].id;
         final String presetName = presets[currentPreset].name;
         final float currentEvStops = (camera != null && evMax > evMin)
@@ -1210,22 +1276,23 @@ public class MainActivity extends ComponentActivity {
                 : 0f;
         final String aspectLabel = aspectRatio.label;
         final boolean frontSnapshot = facingFront;
-        final CompositionMath.MoveCue cueSnapshot = latestMoveCue;
+        final boolean hadFaceSnapshot = lastFaceBox != null
+                && (SystemClock.uptimeMillis() - lastFaceActiveMs) <= FACE_STALE_MS;
         final boolean zh = isChineseLocale();
         final boolean wantVision = prefs.isAiVisionEnabled();
 
         new Thread(() -> {
             Bitmap snapshot = null;
-            AiCoachMath.AiAdvice advice = null;
+            AiCoachMath.AiDirectorPlan plan = null;
             String err = null;
             try {
                 if (wantVision) {
                     snapshot = previewView.capturePreviewSnapshot(640);
                 }
-                advice = AiCoachClient.adviseViewfinder(
-                        this, prefs, snapshot, statsSnapshot, tiltSnapshot,
-                        presetId, presetName, currentEvStops, aspectLabel, frontSnapshot, zh,
-                        cueSnapshot);
+                plan = AiCoachClient.directViewfinder(
+                        this, prefs, snapshot, statsSnapshot, tiltSnapshot, elevSnapshot,
+                        presetId, presetName, currentEvStops, aspectLabel,
+                        frontSnapshot, hadFaceSnapshot, zh);
             } catch (Exception e) {
                 err = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             } finally {
@@ -1233,99 +1300,63 @@ public class MainActivity extends ComponentActivity {
                     snapshot.recycle();
                 }
             }
-            final AiCoachMath.AiAdvice finalAdvice = advice;
+            final AiCoachMath.AiDirectorPlan finalPlan = plan;
             final String finalErr = err;
             runOnUiThread(() -> {
                 aiCoachBusy = false;
-                aiCoachButton.setAlpha(0.82f);
+                aiDirectorThinking = false;
                 if (!isActivityResumed || isDestroyed() || isFinishing() || gen != aiCoachGen.get()) {
+                    aiCoachButton.setAlpha(activeDirectorPlan != null ? 1f : 0.82f);
+                    refreshAssistHint();
                     return;
                 }
-                if (finalAdvice != null && !finalAdvice.isEmpty()) {
+                if (finalPlan != null && !finalPlan.isEmpty()) {
+                    activeDirectorPlan = finalPlan;
+                    aiCoachButton.setAlpha(1f);
+                    applyDirectorSettings(finalPlan);
+                    moveGuideState.reset();
+                    syncAssistSensorsAndTelemetry();
                     shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                    showAiCoachCard(finalAdvice);
                 } else {
-                    hideAiCoachCard();
+                    clearDirectorPlan();
                     Toast.makeText(this,
                             getString(R.string.ai_coach_failed, String.valueOf(finalErr)),
                             Toast.LENGTH_LONG).show();
                 }
             });
-        }, "otc-ai-coach").start();
+        }, "otc-ai-director").start();
     }
 
-    private void showAiCoachThinking() {
-        if (aiCoachCard == null || bottomDeck == null) return;
-        pendingAiAdvice = null;
-        bottomDeck.setVisibility(View.INVISIBLE);
-        aiCoachCard.setVisibility(View.VISIBLE);
-        refreshMoveGuide();
-        aiCoachDiag.setText(R.string.ai_coach_thinking);
-        aiCoachDiag.setTextColor(getColor(R.color.paper_dim));
-        aiCoachDiag.setVisibility(View.VISIBLE);
-        aiCoachAction.setVisibility(View.GONE);
-        aiCoachApplyBtn.setVisibility(View.GONE);
+    private void clearDirectorPlan() {
+        aiCoachGen.incrementAndGet();
+        aiCoachBusy = false;
+        aiDirectorThinking = false;
+        activeDirectorPlan = null;
+        lastLockedState = false;
+        moveGuideState.reset();
+        if (shutterProgress != null) {
+            shutterProgress.setReadyLocked(false);
+        }
+        if (aiCoachButton != null) {
+            aiCoachButton.setAlpha(0.82f);
+        }
+        syncAssistSensorsAndTelemetry();
     }
 
-    private void showAiCoachCard(AiCoachMath.AiAdvice advice) {
-        if (aiCoachCard == null || bottomDeck == null || advice == null || advice.isEmpty()) return;
-        pendingAiAdvice = advice;
-        bottomDeck.setVisibility(View.INVISIBLE);
-        aiCoachCard.setVisibility(View.VISIBLE);
-
-        if (!advice.diagnosis.isEmpty()) {
-            aiCoachDiag.setText(getString(R.string.ai_coach_diag_label) + " · " + advice.diagnosis);
-            aiCoachDiag.setTextColor(getColor(R.color.paper));
-            aiCoachDiag.setVisibility(View.VISIBLE);
-        } else {
-            aiCoachDiag.setVisibility(View.GONE);
+    private void applyDirectorSettings(AiCoachMath.AiDirectorPlan plan) {
+        if (plan == null || capturing) return;
+        List<String> applied = new ArrayList<>(2);
+        if (!plan.recommendedPresetId.isEmpty()
+                && !plan.recommendedPresetId.equals(presets[currentPreset].id)) {
+            int idx = FilmPresets.indexOfId(plan.recommendedPresetId);
+            applyPresetSelection(idx, true);
+            applied.add(presets[idx].name);
         }
-
-        if (!advice.action.isEmpty()) {
-            aiCoachAction.setText(getString(R.string.ai_coach_act_label) + " · " + advice.action);
-            aiCoachAction.setVisibility(View.VISIBLE);
-        } else {
-            aiCoachAction.setVisibility(View.GONE);
-        }
-
-        List<String> tweaks = new ArrayList<>(3);
-        if (advice.hasActionablePresetChange(presets[currentPreset].id)) {
-            int idx = FilmPresets.indexOfId(advice.recommendedPresetId);
-            tweaks.add(presets[idx].name);
-        }
-        if (Math.abs(advice.evDelta) >= 0.25f && evMax > evMin && camera != null) {
-            tweaks.add(String.format(Locale.US, "EV %+.1f", advice.evDelta));
-        }
-        if (advice.hasActionableGridChange(gridMode)) {
-            tweaks.add(gridShortLabel(advice.recommendedGrid));
-        }
-        if (!tweaks.isEmpty()) {
-            aiCoachApplyBtn.setText(getString(R.string.ai_coach_apply_btn, String.join(" · ", tweaks)));
-            aiCoachApplyBtn.setVisibility(View.VISIBLE);
-        } else {
-            aiCoachApplyBtn.setVisibility(View.GONE);
-        }
-    }
-
-    private void hideAiCoachCard() {
-        pendingAiAdvice = null;
-        if (aiCoachCard != null) aiCoachCard.setVisibility(View.GONE);
-        if (bottomDeck != null) bottomDeck.setVisibility(View.VISIBLE);
-        refreshMoveGuide();
-    }
-
-    private void applyPendingAiAdvice() {
-        AiCoachMath.AiAdvice advice = pendingAiAdvice;
-        if (advice == null || capturing) return;
-
-        if (advice.hasActionablePresetChange(presets[currentPreset].id)) {
-            applyPresetSelection(FilmPresets.indexOfId(advice.recommendedPresetId), true);
-        }
-        if (Math.abs(advice.evDelta) >= 0.25f && evMax > evMin && camera != null) {
+        if (Math.abs(plan.evDelta) >= 0.25f && evMax > evMin && camera != null) {
             int curIdx = camera.getCameraInfo().getExposureState().getExposureCompensationIndex();
-            int deltaSteps = Math.round(advice.evDelta / Math.max(0.1f, evStep));
+            int deltaSteps = Math.round(plan.evDelta / Math.max(0.1f, evStep));
             if (deltaSteps == 0) {
-                deltaSteps = advice.evDelta > 0f ? 1 : -1;
+                deltaSteps = plan.evDelta > 0f ? 1 : -1;
             }
             int nextIdx = Math.max(evMin, Math.min(evMax, curIdx + deltaSteps));
             if (nextIdx != curIdx) {
@@ -1336,28 +1367,11 @@ public class MainActivity extends ComponentActivity {
                 lastShownExposureAdvice = ExposureAdvisor.Advice.NONE;
                 exposureHintAutoFaded = false;
                 mainHandler.removeCallbacks(autoFadeExposureTask);
+                applied.add(String.format(Locale.US, "EV %+.1f", (nextIdx - curIdx) * evStep));
             }
         }
-        if (advice.hasActionableGridChange(gridMode)) {
-            gridMode = advice.recommendedGrid;
-            prefs.setGridMode(gridMode);
-            snapState.reset();
-            viewfinderOverlay.setPowerPointHighlight(-1);
-            updateGridUi();
-            syncAssistSensorsAndTelemetry();
-        }
-        shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-        hideAiCoachCard();
-        toast(R.string.ai_coach_applied);
-    }
-
-    private String gridShortLabel(CompositionMath.GridMode mode) {
-        boolean zh = isChineseLocale();
-        switch (mode) {
-            case THIRDS: return zh ? "三分线" : "Thirds";
-            case GOLDEN_SPIRAL: return zh ? "螺旋线" : "Golden";
-            case CROSSHAIR: return zh ? "十字线" : "Cross";
-            default: return "";
+        if (!applied.isEmpty()) {
+            showTransientHintText(getString(R.string.ai_director_applied, String.join(" · ", applied)));
         }
     }
 
@@ -1513,10 +1527,7 @@ public class MainActivity extends ComponentActivity {
         }
         cancelCountdown();
         cancelSteadyWait(false);
-        aiCoachGen.incrementAndGet();
-        aiCoachBusy = false;
-        if (aiCoachButton != null) aiCoachButton.setAlpha(0.82f);
-        hideAiCoachCard();
+        clearDirectorPlan();
         lastFaceActiveMs = 0L;
         lastFaceActiveX = Float.NaN;
         lastFaceActiveY = Float.NaN;
@@ -1543,7 +1554,7 @@ public class MainActivity extends ComponentActivity {
             return;
         }
         cancelSteadyWait(true);
-        hideAiCoachCard();
+        clearDirectorPlan();
         DarkroomSheet.show(this, prefs, new DarkroomSheet.Callbacks() {
             @Override
             public void onAspectChanged(CameraPrefs.AspectRatio ratio) {
@@ -2073,7 +2084,6 @@ public class MainActivity extends ComponentActivity {
     // ------------------------------------------------------------------ shutter
 
     private void takePhoto() {
-        hideAiCoachCard();
         if (steadyWaiting) {
             cancelSteadyWait(false);
             captureNow();
@@ -2443,6 +2453,9 @@ public class MainActivity extends ComponentActivity {
 
     private void onPhotoSaved(Uri savedUri, Bitmap thumb) {
         advanceRollAndThumbnail(savedUri, thumb);
+        if (activeDirectorPlan != null) {
+            clearDirectorPlan();
+        }
         // Advance the organic leak seed for the next exposure so consecutive
         // shots on the roll get subtle edge variation while staying WYSIWYG.
         leakSeed = (leakSeed + 0.37f) % 1.0f;
@@ -2599,13 +2612,18 @@ public class MainActivity extends ComponentActivity {
         lastFaceBox = null;
         lastFaceActiveMs = 0L;
         moveGuideState.reset();
-        latestMoveCue = CompositionMath.MoveCue.EMPTY;
+        latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
+        lastLockedState = false;
+        if (shutterProgress != null) {
+            shutterProgress.setReadyLocked(false);
+        }
         if (viewfinderOverlay != null) {
-            viewfinderOverlay.setMoveCue(CompositionMath.MoveCue.EMPTY, "", false);
+            viewfinderOverlay.setGuide3DCue(CompositionMath.Guide3DCue.EMPTY, "");
         }
         aiCoachGen.incrementAndGet();
         aiCoachBusy = false;
-        hideAiCoachCard();
+        aiDirectorThinking = false;
+        activeDirectorPlan = null;
         if (aiCoachButton != null) aiCoachButton.setAlpha(0.82f);
         endScreenFlash();
         if (orientationListener != null) {

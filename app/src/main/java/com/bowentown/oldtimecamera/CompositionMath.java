@@ -294,49 +294,231 @@ public final class CompositionMath {
         }
     }
 
-    public enum PanX { NONE, LEFT, RIGHT }
-    public enum PanY { NONE, UP, DOWN }
-    public enum DepthMove { NONE, CLOSER, BACK }
+    /** Single prioritized physical motion step for the 3D viewfinder HUD. */
+    public enum Step3D {
+        NONE,
+        STEP_CLOSER,
+        STEP_BACK,
+        MOVE_LEFT,
+        MOVE_RIGHT,
+        MOVE_UP,
+        MOVE_DOWN,
+        TILT_TOP_AWAY,
+        TILT_TOP_TOWARD,
+        LOCKED
+    }
 
-    /** Minimalist physical camera movement cue ready for edge-symbol rendering. */
-    public static final class MoveCue {
-        public static final MoveCue EMPTY = new MoveCue(PanX.NONE, PanY.NONE, DepthMove.NONE, 0f, 0f);
+    /** Spatial & pitch target set by the AI Live Director ("指哪打哪"). */
+    public static final class DirectorTarget {
+        public final float targetX;
+        public final float targetY;
+        public final float targetSize;
+        public final float targetElevationDeg;
+        public final boolean checkElevation;
 
-        public final PanX panX;
-        public final PanY panY;
-        public final DepthMove depth;
-        public final float strengthX;
-        public final float strengthY;
+        public DirectorTarget(float targetX, float targetY, float targetSize,
+                              float targetElevationDeg, boolean checkElevation) {
+            this.targetX = clampRange(targetX, 0.15f, 0.85f);
+            this.targetY = clampRange(targetY, 0.15f, 0.85f);
+            this.targetSize = clampRange(targetSize, 0.12f, 0.58f);
+            this.targetElevationDeg = clampRange(targetElevationDeg, -35f, 35f);
+            this.checkElevation = checkElevation;
+        }
+    }
 
-        public MoveCue(PanX panX, PanY panY, DepthMove depth, float strengthX, float strengthY) {
-            this.panX = panX != null ? panX : PanX.NONE;
-            this.panY = panY != null ? panY : PanY.NONE;
-            this.depth = depth != null ? depth : DepthMove.NONE;
-            this.strengthX = clamp01(strengthX);
-            this.strengthY = clamp01(strengthY);
+    /** Immutable 3D HUD instruction + optional AI director target frame in normalized [0..1] coords. */
+    public static final class Guide3DCue {
+        public static final Guide3DCue EMPTY = new Guide3DCue(
+                Step3D.NONE, 0f, false, false, Float.NaN, Float.NaN, 0f, 0f, 0f, 0f);
+
+        public final Step3D step;
+        public final float intensity;
+        public final boolean directorActive;
+        public final boolean locked;
+        public final float subjectX;
+        public final float subjectY;
+        public final float targetBoxLeft;
+        public final float targetBoxTop;
+        public final float targetBoxRight;
+        public final float targetBoxBottom;
+
+        public Guide3DCue(Step3D step, float intensity, boolean directorActive, boolean locked,
+                          float subjectX, float subjectY,
+                          float targetBoxLeft, float targetBoxTop,
+                          float targetBoxRight, float targetBoxBottom) {
+            this.step = step != null ? step : Step3D.NONE;
+            this.intensity = clamp01(intensity);
+            this.directorActive = directorActive;
+            this.locked = locked;
+            this.subjectX = Float.isNaN(subjectX) ? Float.NaN : clamp01(subjectX);
+            this.subjectY = Float.isNaN(subjectY) ? Float.NaN : clamp01(subjectY);
+            this.targetBoxLeft = clamp01(targetBoxLeft);
+            this.targetBoxTop = clamp01(targetBoxTop);
+            this.targetBoxRight = clamp01(targetBoxRight);
+            this.targetBoxBottom = clamp01(targetBoxBottom);
         }
 
         public boolean isEmpty() {
-            return panX == PanX.NONE && panY == PanY.NONE && depth == DepthMove.NONE;
+            return step == Step3D.NONE && !directorActive;
         }
 
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
-            if (!(o instanceof MoveCue)) return false;
-            MoveCue other = (MoveCue) o;
-            return panX == other.panX && panY == other.panY && depth == other.depth;
+            if (!(o instanceof Guide3DCue)) return false;
+            Guide3DCue other = (Guide3DCue) o;
+            return step == other.step
+                    && directorActive == other.directorActive
+                    && locked == other.locked
+                    && Math.abs(targetBoxLeft - other.targetBoxLeft) < 0.005f
+                    && Math.abs(targetBoxTop - other.targetBoxTop) < 0.005f;
         }
 
         @Override
         public int hashCode() {
-            return (panX.ordinal() * 31 + panY.ordinal()) * 31 + depth.ordinal();
+            int h = step.ordinal();
+            h = h * 31 + (directorActive ? 1 : 0);
+            h = h * 31 + (locked ? 1 : 0);
+            return h;
+        }
+    }
+
+    /** 6-DoF normalized pose of the 3D wireframe mini-phone in view units relative to {@code halfH}. */
+    public static final class Pose3D {
+        public final float tx;
+        public final float ty;
+        public final float tz;
+        public final float pitchDeg;
+        public final float yawDeg;
+
+        public Pose3D(float tx, float ty, float tz, float pitchDeg, float yawDeg) {
+            this.tx = tx;
+            this.ty = ty;
+            this.tz = tz;
+            this.pitchDeg = pitchDeg;
+            this.yawDeg = yawDeg;
+        }
+
+        public static Pose3D lerp(Pose3D a, Pose3D b, float t) {
+            float u = clamp01(t);
+            return new Pose3D(
+                    a.tx + (b.tx - a.tx) * u,
+                    a.ty + (b.ty - a.ty) * u,
+                    a.tz + (b.tz - a.tz) * u,
+                    a.pitchDeg + (b.pitchDeg - a.pitchDeg) * u,
+                    a.yawDeg + (b.yawDeg - a.yawDeg) * u);
         }
     }
 
     /**
-     * Stateful anti-flicker evaluator turning face bounds, tap focus, or preview saliency
-     * into real-time physical camera movement suggestions (pan left/right/up/down & step closer/back).
+     * Optical-axis elevation in degrees from accelerometer gravity {@code (gx, gy, gz)}.
+     * Positive when lens points UP (仰拍); negative when lens points DOWN (俯拍).
+     */
+    public static float computeCameraElevationDegrees(
+            float gx, float gy, float gz, boolean facingFront) {
+        float inPlane = (float) Math.hypot(gx, gy);
+        if (inPlane < 1e-3f && Math.abs(gz) < 1e-3f) {
+            return 0f;
+        }
+        float screenBackTiltDeg = (float) Math.toDegrees(Math.atan2(gz, inPlane));
+        return facingFront ? screenBackTiltDeg : -screenBackTiltDeg;
+    }
+
+    /** Maps optical elevation error to physical hand tilt step for the phone's top edge. */
+    public static Step3D computeHandTiltStep(
+            float currentElevationDeg, float targetElevationDeg, boolean facingFront) {
+        float deltaElev = targetElevationDeg - currentElevationDeg;
+        float deltaScreenBackTilt = facingFront ? deltaElev : -deltaElev;
+        return deltaScreenBackTilt >= 0f ? Step3D.TILT_TOP_AWAY : Step3D.TILT_TOP_TOWARD;
+    }
+
+    /** Returns {@code {startPose, endPose}} keyframes for smoothstep 3D mini-phone animation. */
+    public static Pose3D[] keyframesForStep(Step3D step, float intensity) {
+        float gain = 0.72f + 0.28f * clamp01(intensity);
+        switch (step) {
+            case STEP_CLOSER:
+                return new Pose3D[]{
+                        new Pose3D(0f, 0.16f * gain, -0.30f * gain, 14f, 18f),
+                        new Pose3D(0f, -0.20f * gain, 1.05f * gain, 14f, 18f)
+                };
+            case STEP_BACK:
+                return new Pose3D[]{
+                        new Pose3D(0f, -0.20f * gain, 1.05f * gain, 14f, 18f),
+                        new Pose3D(0f, 0.16f * gain, -0.30f * gain, 14f, 18f)
+                };
+            case MOVE_LEFT:
+                return new Pose3D[]{
+                        new Pose3D(0.55f * gain, 0f, 0f, 8f, 12f),
+                        new Pose3D(-0.55f * gain, 0f, 0f, 8f, -18f)
+                };
+            case MOVE_RIGHT:
+                return new Pose3D[]{
+                        new Pose3D(-0.55f * gain, 0f, 0f, 8f, -12f),
+                        new Pose3D(0.55f * gain, 0f, 0f, 8f, 18f)
+                };
+            case MOVE_UP:
+                return new Pose3D[]{
+                        new Pose3D(0f, 0.42f * gain, 0f, 8f, 14f),
+                        new Pose3D(0f, -0.42f * gain, 0f, 8f, 14f)
+                };
+            case MOVE_DOWN:
+                return new Pose3D[]{
+                        new Pose3D(0f, -0.42f * gain, 0f, 8f, 14f),
+                        new Pose3D(0f, 0.42f * gain, 0f, 8f, 14f)
+                };
+            case TILT_TOP_AWAY:
+                return new Pose3D[]{
+                        new Pose3D(0f, 0f, 0.08f, -18f, 14f),
+                        new Pose3D(0f, 0f, 0.08f, 36f, 14f)
+                };
+            case TILT_TOP_TOWARD:
+                return new Pose3D[]{
+                        new Pose3D(0f, 0f, 0.08f, 28f, 14f),
+                        new Pose3D(0f, 0f, 0.08f, -30f, 14f)
+                };
+            default:
+                Pose3D steady = new Pose3D(0f, 0f, 0f, 8f, 12f);
+                return new Pose3D[]{steady, steady};
+        }
+    }
+
+    /**
+     * Projects the 4 corners of a 3D phone face (TL, TR, BR, BL) at local depth {@code localZ}
+     * around origin {@code (0, 0)} with positive X right, Y down, Z into screen depth.
+     */
+    public static void projectPhoneCorners(
+            Pose3D pose, float halfW, float halfH, float localZ,
+            float focalLen, float[] out8XY) {
+        if (pose == null || out8XY == null || out8XY.length < 8) return;
+        double pr = Math.toRadians(pose.pitchDeg);
+        double yr = Math.toRadians(pose.yawDeg);
+        float cosP = (float) Math.cos(pr);
+        float sinP = (float) Math.sin(pr);
+        float cosY = (float) Math.cos(yr);
+        float sinY = (float) Math.sin(yr);
+
+        float txPx = pose.tx * halfH;
+        float tyPx = pose.ty * halfH;
+        float tzPx = pose.tz * halfH;
+
+        float[] lx = {-halfW, halfW, halfW, -halfW};
+        float[] ly = {-halfH, -halfH, halfH, halfH};
+        for (int i = 0; i < 4; i++) {
+            float y1 = ly[i] * cosP + localZ * sinP;
+            float z1 = -ly[i] * sinP + localZ * cosP;
+            float x2 = lx[i] * cosY - z1 * sinY;
+            float z2 = lx[i] * sinY + z1 * cosY;
+
+            float denom = Math.max(0.25f * focalLen, focalLen + z2 + tzPx);
+            float scale = focalLen / denom;
+            out8XY[i * 2] = (x2 + txPx) * scale;
+            out8XY[i * 2 + 1] = (y1 + tyPx) * scale;
+        }
+    }
+
+    /**
+     * Stateful anti-flicker single-step evaluator prioritizing Depth -> Translation -> 3D Pitch
+     * with brief alignment confirmation in normal mode and persistent gold lock in AI Director mode.
      */
     public static final class MoveGuideState {
         private int lastSourceTag = 0; // 0=none, 1=face, 2=tap, 3=saliency
@@ -344,10 +526,13 @@ public final class CompositionMath {
         private float smoothX = 0.5f;
         private float smoothY = 0.5f;
         private float smoothFaceH = 0f;
+        private boolean hasSmoothedElev = false;
+        private float smoothElevDeg = 0f;
 
-        private PanX activePanX = PanX.NONE;
-        private PanY activePanY = PanY.NONE;
-        private DepthMove activeDepth = DepthMove.NONE;
+        private Step3D activeStep = Step3D.NONE;
+        private long guidedSinceMs = 0L;
+        private long lockedUntilMs = 0L;
+        private boolean lastDirectorMode = false;
 
         public void reset() {
             lastSourceTag = 0;
@@ -355,12 +540,15 @@ public final class CompositionMath {
             smoothX = 0.5f;
             smoothY = 0.5f;
             smoothFaceH = 0f;
-            activePanX = PanX.NONE;
-            activePanY = PanY.NONE;
-            activeDepth = DepthMove.NONE;
+            hasSmoothedElev = false;
+            smoothElevDeg = 0f;
+            activeStep = Step3D.NONE;
+            guidedSinceMs = 0L;
+            lockedUntilMs = 0L;
+            lastDirectorMode = false;
         }
 
-        public MoveCue evaluate(
+        public Guide3DCue evaluate(
                 boolean hasFace,
                 ActiveBox faceBox,
                 boolean hasTapSubject,
@@ -368,14 +556,32 @@ public final class CompositionMath {
                 float tapY,
                 PreviewStats stats,
                 GridMode gridMode,
-                int goldenRotSteps) {
+                int goldenRotSteps,
+                float cameraElevationDeg,
+                boolean facingFront,
+                DirectorTarget directorTarget,
+                long nowMs) {
+            boolean director = directorTarget != null;
+            if (director != lastDirectorMode) {
+                activeStep = Step3D.NONE;
+                guidedSinceMs = 0L;
+                lockedUntilMs = 0L;
+                lastDirectorMode = director;
+            }
+
+            if (!hasSmoothedElev) {
+                hasSmoothedElev = true;
+                smoothElevDeg = cameraElevationDeg;
+            } else {
+                smoothElevDeg = smoothElevDeg + (cameraElevationDeg - smoothElevDeg) * 0.35f;
+            }
+
             int sourceTag = 0;
             float rawX = Float.NaN;
             float rawY = Float.NaN;
             if (hasFace && faceBox != null) {
                 sourceTag = 1;
                 rawX = faceBox.centerX();
-                // Bias anchor to eye line (~42% down face box) for natural portrait headroom.
                 rawY = clamp01(faceBox.top + (faceBox.bottom - faceBox.top) * 0.42f);
             } else if (hasTapSubject && !Float.isNaN(tapX) && !Float.isNaN(tapY)) {
                 sourceTag = 2;
@@ -388,11 +594,16 @@ public final class CompositionMath {
             }
 
             if (sourceTag == 0) {
-                reset();
-                return MoveCue.EMPTY;
-            }
-
-            if (sourceTag != lastSourceTag || !hasSmoothedPos) {
+                lastSourceTag = 0;
+                hasSmoothedPos = false;
+                smoothFaceH = 0f;
+                if (!director) {
+                    activeStep = Step3D.NONE;
+                    guidedSinceMs = 0L;
+                    lockedUntilMs = 0L;
+                    return Guide3DCue.EMPTY;
+                }
+            } else if (sourceTag != lastSourceTag || !hasSmoothedPos) {
                 lastSourceTag = sourceTag;
                 hasSmoothedPos = true;
                 smoothX = rawX;
@@ -401,51 +612,161 @@ public final class CompositionMath {
             } else {
                 smoothX = smoothX + (rawX - smoothX) * 0.42f;
                 smoothY = smoothY + (rawY - smoothY) * 0.42f;
-                if (sourceTag == 1) {
-                    smoothFaceH = smoothFaceH + (faceBox.rawHeight - smoothFaceH) * 0.35f;
-                } else {
-                    smoothFaceH = 0f;
-                }
+                smoothFaceH = (sourceTag == 1)
+                        ? (smoothFaceH + (faceBox.rawHeight - smoothFaceH) * 0.35f)
+                        : 0f;
             }
 
             boolean faceSource = (sourceTag == 1);
-            updateDepthState(faceSource, faceBox, stats);
+            Step3D nextStep = Step3D.NONE;
+            float strength = 0f;
 
-            float dx = 0f;
-            float dy = 0f;
-            GridMode mode = gridMode != null ? gridMode : GridMode.OFF;
+            // Priority 1: Depth (step back / step closer)
+            Step3D depthStep = evaluateDepthStep(faceSource, faceBox, stats, directorTarget);
+            if (depthStep != Step3D.NONE) {
+                nextStep = depthStep;
+                strength = 0.7f;
+            }
 
-            if (mode != GridMode.OFF) {
-                float[] target = pickGridTarget(smoothX, smoothY, faceSource, mode, goldenRotSteps);
-                dx = target[0] - smoothX; // > 0 => subject left of target => move camera LEFT
-                dy = target[1] - smoothY; // > 0 => subject above target => move camera UP
+            // Priority 2: Single dominant pan direction (X vs Y)
+            if (nextStep == Step3D.NONE && hasSmoothedPos) {
+                float dx = 0f;
+                float dy = 0f;
+                if (director) {
+                    dx = directorTarget.targetX - smoothX;
+                    dy = directorTarget.targetY - smoothY;
+                } else {
+                    GridMode mode = gridMode != null ? gridMode : GridMode.OFF;
+                    if (mode != GridMode.OFF) {
+                        float[] target = pickGridTarget(smoothX, smoothY, faceSource, mode, goldenRotSteps);
+                        dx = target[0] - smoothX;
+                        dy = target[1] - smoothY;
+                    } else {
+                        dx = balancedDeltaX(smoothX, faceSource, faceBox);
+                        dy = balancedDeltaY(smoothY, faceSource, faceBox);
+                    }
+                }
 
-                activePanX = updateGridAxisX(activePanX, dx);
-                activePanY = updateGridAxisY(activePanY, dy);
-                if (faceSource && faceBox.top < 0.085f && activeDepth != DepthMove.BACK) {
-                    activePanY = PanY.UP;
+                float enter = 0.085f;
+                float exit = 0.050f;
+                boolean wasX = (activeStep == Step3D.MOVE_LEFT || activeStep == Step3D.MOVE_RIGHT);
+                boolean wasY = (activeStep == Step3D.MOVE_UP || activeStep == Step3D.MOVE_DOWN);
+                boolean xNeed = wasX ? (Math.abs(dx) > exit) : (Math.abs(dx) >= enter);
+                boolean yNeed = wasY ? (Math.abs(dy) > exit) : (Math.abs(dy) >= enter);
+                if (faceSource && faceBox != null && faceBox.top < 0.085f && !director) {
+                    yNeed = true;
                     dy = Math.max(dy, 0.14f);
                 }
+                if (xNeed || yNeed) {
+                    float scoreX = xNeed ? Math.abs(dx) * (wasX ? 1.18f : 1f) : -1f;
+                    float scoreY = yNeed ? Math.abs(dy) * (wasY ? 1.18f : 1f) : -1f;
+                    if (scoreX >= scoreY) {
+                        nextStep = dx >= 0f ? Step3D.MOVE_LEFT : Step3D.MOVE_RIGHT;
+                        strength = clamp01((Math.abs(dx) - 0.04f) / 0.24f);
+                    } else {
+                        nextStep = dy >= 0f ? Step3D.MOVE_UP : Step3D.MOVE_DOWN;
+                        strength = clamp01((Math.abs(dy) - 0.04f) / 0.24f);
+                    }
+                }
+            }
+
+            // Priority 3: True 3D camera pitch/elevation correction
+            if (nextStep == Step3D.NONE) {
+                Step3D pitchStep = evaluatePitchStep(faceSource, facingFront, directorTarget);
+                if (pitchStep != Step3D.NONE) {
+                    nextStep = pitchStep;
+                    float targetElev = director
+                            ? directorTarget.targetElevationDeg
+                            : (smoothElevDeg >= 0f ? 0f : -12f);
+                    strength = clamp01((Math.abs(targetElev - smoothElevDeg) - 5f) / 22f);
+                }
+            }
+
+            if (nextStep != Step3D.NONE) {
+                if (activeStep == Step3D.NONE || activeStep == Step3D.LOCKED) {
+                    guidedSinceMs = nowMs;
+                }
+                activeStep = nextStep;
+                lockedUntilMs = 0L;
             } else {
-                activePanX = updateBalancedX(activePanX, smoothX, faceSource, faceBox);
-                activePanY = updateBalancedY(activePanY, smoothY, faceSource, faceBox);
-                dx = computeBalancedDx(activePanX, smoothX);
-                dy = computeBalancedDy(activePanY, smoothY, faceSource, faceBox);
+                if (director) {
+                    activeStep = hasSmoothedPos ? Step3D.LOCKED : Step3D.NONE;
+                } else {
+                    boolean hadRealGuidance = activeStep != Step3D.NONE
+                            && activeStep != Step3D.LOCKED
+                            && guidedSinceMs > 0L
+                            && (nowMs - guidedSinceMs) >= 280L;
+                    if (hadRealGuidance && hasSmoothedPos) {
+                        lockedUntilMs = nowMs + 600L;
+                        activeStep = Step3D.LOCKED;
+                    } else if (activeStep == Step3D.LOCKED && nowMs < lockedUntilMs && hasSmoothedPos) {
+                        activeStep = Step3D.LOCKED;
+                    } else {
+                        activeStep = Step3D.NONE;
+                        lockedUntilMs = 0L;
+                    }
+                    guidedSinceMs = 0L;
+                }
             }
 
-            // When face fills nearly the full frame height, stepping back cleanly resolves both
-            // cropping and distortion without noisy vertical arrows fighting the user.
-            if (activeDepth == DepthMove.BACK && faceSource && smoothFaceH > 0.52f) {
-                activePanY = PanY.NONE;
-                dy = 0f;
+            boolean locked = (activeStep == Step3D.LOCKED);
+            float boxL = 0f, boxT = 0f, boxR = 0f, boxB = 0f;
+            if (director) {
+                float halfH = Math.max(0.09f, directorTarget.targetSize * 0.58f);
+                float halfW = Math.max(0.08f, halfH * 0.84f);
+                float centerY = faceSource
+                        ? clamp01(directorTarget.targetY + 0.08f * directorTarget.targetSize)
+                        : directorTarget.targetY;
+                boxL = clamp01(directorTarget.targetX - halfW);
+                boxT = clamp01(centerY - halfH);
+                boxR = clamp01(directorTarget.targetX + halfW);
+                boxB = clamp01(centerY + halfH);
             }
-
-            float sx = activePanX == PanX.NONE ? 0f : clamp01((Math.abs(dx) - 0.04f) / 0.24f);
-            float sy = activePanY == PanY.NONE ? 0f : clamp01((Math.abs(dy) - 0.04f) / 0.24f);
-            return new MoveCue(activePanX, activePanY, activeDepth, sx, sy);
+            return new Guide3DCue(
+                    activeStep, strength, director, locked,
+                    hasSmoothedPos ? smoothX : Float.NaN,
+                    hasSmoothedPos ? smoothY : Float.NaN,
+                    boxL, boxT, boxR, boxB);
         }
 
-        private void updateDepthState(boolean faceSource, ActiveBox faceBox, PreviewStats stats) {
+        private Step3D evaluateDepthStep(
+                boolean faceSource, ActiveBox faceBox, PreviewStats stats, DirectorTarget target) {
+            boolean wasCloser = (activeStep == Step3D.STEP_CLOSER);
+            boolean wasBack = (activeStep == Step3D.STEP_BACK);
+
+            if (target != null) {
+                if (faceSource && faceBox != null) {
+                    float tooCloseEnter = target.targetSize + 0.13f;
+                    float tooCloseExit = target.targetSize + 0.08f;
+                    float tooFarEnter = target.targetSize - 0.11f;
+                    float tooFarExit = target.targetSize - 0.06f;
+                    if (smoothFaceH >= tooCloseEnter
+                            || (faceBox.clipped && smoothFaceH > target.targetSize)) {
+                        return Step3D.STEP_BACK;
+                    }
+                    if (smoothFaceH > 0f && smoothFaceH <= tooFarEnter) {
+                        return Step3D.STEP_CLOSER;
+                    }
+                    if (wasBack && (smoothFaceH >= tooCloseExit || faceBox.clipped)) {
+                        return Step3D.STEP_BACK;
+                    }
+                    if (wasCloser && smoothFaceH > 0f && smoothFaceH < tooFarExit) {
+                        return Step3D.STEP_CLOSER;
+                    }
+                    return Step3D.NONE;
+                }
+                if (stats != null && stats.saliencyConfidence >= 0.24f) {
+                    float estSize = clamp01(stats.saliencySpread * 1.45f);
+                    if (estSize <= target.targetSize - 0.12f && stats.borderEdgeRatio < 0.24f) {
+                        return Step3D.STEP_CLOSER;
+                    }
+                    if (wasCloser && estSize < target.targetSize - 0.07f) {
+                        return Step3D.STEP_CLOSER;
+                    }
+                }
+                return Step3D.NONE;
+            }
+
             if (faceSource && faceBox != null) {
                 boolean tooCloseEnter = smoothFaceH >= 0.46f || (smoothFaceH >= 0.31f && faceBox.clipped);
                 boolean tooCloseExit = smoothFaceH < 0.40f && !faceBox.clipped;
@@ -453,30 +774,46 @@ public final class CompositionMath {
                 boolean tooFarEnter = smoothFaceH > 0f && smoothFaceH <= 0.115f && smallSpread;
                 boolean tooFarExit = smoothFaceH >= 0.145f || (stats != null && stats.saliencySpread >= 0.26f);
 
-                if (tooCloseEnter) {
-                    activeDepth = DepthMove.BACK;
-                } else if (tooFarEnter) {
-                    activeDepth = DepthMove.CLOSER;
-                } else if (activeDepth == DepthMove.BACK && tooCloseExit) {
-                    activeDepth = DepthMove.NONE;
-                } else if (activeDepth == DepthMove.CLOSER && tooFarExit) {
-                    activeDepth = DepthMove.NONE;
-                }
-                return;
+                if (tooCloseEnter || (wasBack && !tooCloseExit)) return Step3D.STEP_BACK;
+                if (tooFarEnter || (wasCloser && !tooFarExit)) return Step3D.STEP_CLOSER;
+                return Step3D.NONE;
             }
 
-            if (activeDepth == DepthMove.BACK) {
-                activeDepth = DepthMove.NONE;
-            }
             if (stats != null && stats.saliencyConfidence >= 0.30f) {
                 if (stats.saliencySpread < 0.145f && stats.borderEdgeRatio < 0.22f) {
-                    activeDepth = DepthMove.CLOSER;
-                } else if (activeDepth == DepthMove.CLOSER && stats.saliencySpread > 0.180f) {
-                    activeDepth = DepthMove.NONE;
+                    return Step3D.STEP_CLOSER;
                 }
-            } else {
-                activeDepth = DepthMove.NONE;
+                if (wasCloser && stats.saliencySpread <= 0.180f) {
+                    return Step3D.STEP_CLOSER;
+                }
             }
+            return Step3D.NONE;
+        }
+
+        private Step3D evaluatePitchStep(boolean faceSource, boolean facingFront, DirectorTarget target) {
+            boolean wasTilt = (activeStep == Step3D.TILT_TOP_AWAY || activeStep == Step3D.TILT_TOP_TOWARD);
+            if (target != null) {
+                if (!target.checkElevation) return Step3D.NONE;
+                float diff = Math.abs(target.targetElevationDeg - smoothElevDeg);
+                float enterDeg = 9.0f;
+                float exitDeg = 5.0f;
+                if (diff >= enterDeg || (wasTilt && diff > exitDeg)) {
+                    return computeHandTiltStep(smoothElevDeg, target.targetElevationDeg, facingFront);
+                }
+                return Step3D.NONE;
+            }
+
+            // In normal mode, only intervene for harsh upward chin/nostril angles on portraits
+            // or accidental extreme downward tilts.
+            if (faceSource) {
+                if (smoothElevDeg >= 16.0f || (wasTilt && smoothElevDeg > 10.0f)) {
+                    return computeHandTiltStep(smoothElevDeg, 0f, facingFront);
+                }
+                if (smoothElevDeg <= -32.0f || (wasTilt && smoothElevDeg < -24.0f)) {
+                    return computeHandTiltStep(smoothElevDeg, -12f, facingFront);
+                }
+            }
+            return Step3D.NONE;
         }
 
         private float[] pickGridTarget(
@@ -502,68 +839,45 @@ public final class CompositionMath {
             return best;
         }
 
-        private PanX updateGridAxisX(PanX current, float dx) {
-            final float enter = 0.085f;
-            final float exit = 0.050f;
-            if (dx >= enter) return PanX.LEFT;
-            if (dx <= -enter) return PanX.RIGHT;
-            if (current == PanX.LEFT && dx > exit) return PanX.LEFT;
-            if (current == PanX.RIGHT && dx < -exit) return PanX.RIGHT;
-            return PanX.NONE;
+        private float balancedDeltaX(float x, boolean faceSource, ActiveBox box) {
+            boolean wasLeft = (activeStep == Step3D.MOVE_LEFT);
+            boolean wasRight = (activeStep == Step3D.MOVE_RIGHT);
+            boolean edgeL = faceSource && box != null && box.left < 0.045f;
+            boolean edgeR = faceSource && box != null && box.right > 0.955f;
+            if (x < 0.26f || edgeL || (wasLeft && x < 0.31f)) {
+                return Math.max(0.09f, 0.31f - x);
+            }
+            if (x > 0.74f || edgeR || (wasRight && x > 0.69f)) {
+                return -Math.max(0.09f, x - 0.69f);
+            }
+            return 0f;
         }
 
-        private PanY updateGridAxisY(PanY current, float dy) {
-            final float enter = 0.085f;
-            final float exit = 0.050f;
-            if (dy >= enter) return PanY.UP;
-            if (dy <= -enter) return PanY.DOWN;
-            if (current == PanY.UP && dy > exit) return PanY.UP;
-            if (current == PanY.DOWN && dy < -exit) return PanY.DOWN;
-            return PanY.NONE;
-        }
-
-        private PanX updateBalancedX(PanX current, float x, boolean faceSource, ActiveBox box) {
-            boolean edgeL = faceSource && box != null && box.left < 0.045f && activeDepth != DepthMove.BACK;
-            boolean edgeR = faceSource && box != null && box.right > 0.955f && activeDepth != DepthMove.BACK;
-            if (x < 0.26f || edgeL) return PanX.LEFT;
-            if (x > 0.74f || edgeR) return PanX.RIGHT;
-            if (current == PanX.LEFT && x < 0.31f) return PanX.LEFT;
-            if (current == PanX.RIGHT && x > 0.69f) return PanX.RIGHT;
-            return PanX.NONE;
-        }
-
-        private PanY updateBalancedY(PanY current, float y, boolean faceSource, ActiveBox box) {
+        private float balancedDeltaY(float y, boolean faceSource, ActiveBox box) {
+            boolean wasUp = (activeStep == Step3D.MOVE_UP);
+            boolean wasDown = (activeStep == Step3D.MOVE_DOWN);
             if (faceSource && box != null) {
-                boolean headroomTight = box.top < 0.085f && activeDepth != DepthMove.BACK;
-                if (headroomTight || y < 0.20f) return PanY.UP;
-                if (y > 0.62f && activeDepth != DepthMove.BACK) return PanY.DOWN;
-                if (current == PanY.UP && (box.top < 0.115f || y < 0.24f)) return PanY.UP;
-                if (current == PanY.DOWN && y > 0.56f) return PanY.DOWN;
-                return PanY.NONE;
+                if (box.top < 0.085f || y < 0.20f || (wasUp && (box.top < 0.115f || y < 0.24f))) {
+                    return Math.max(0.09f, Math.max(0.24f - y, (0.115f - box.top) * 2f));
+                }
+                if (y > 0.62f || (wasDown && y > 0.56f)) {
+                    return -Math.max(0.09f, y - 0.56f);
+                }
+                return 0f;
             }
-            if (y < 0.22f) return PanY.UP;
-            if (y > 0.75f) return PanY.DOWN;
-            if (current == PanY.UP && y < 0.27f) return PanY.UP;
-            if (current == PanY.DOWN && y > 0.70f) return PanY.DOWN;
-            return PanY.NONE;
-        }
-
-        private float computeBalancedDx(PanX panX, float x) {
-            if (panX == PanX.LEFT) return Math.max(0.08f, 0.31f - x);
-            if (panX == PanX.RIGHT) return Math.max(0.08f, x - 0.69f);
-            return 0f;
-        }
-
-        private float computeBalancedDy(PanY panY, float y, boolean faceSource, ActiveBox box) {
-            if (panY == PanY.UP) {
-                float topGap = (faceSource && box != null) ? Math.max(0f, 0.115f - box.top) : 0f;
-                return Math.max(0.08f, Math.max(0.26f - y, topGap * 2f));
+            if (y < 0.22f || (wasUp && y < 0.27f)) {
+                return Math.max(0.09f, 0.27f - y);
             }
-            if (panY == PanY.DOWN) {
-                return Math.max(0.08f, y - (faceSource ? 0.56f : 0.70f));
+            if (y > 0.75f || (wasDown && y > 0.70f)) {
+                return -Math.max(0.09f, y - 0.70f);
             }
             return 0f;
         }
+    }
+
+    private static float clampRange(float v, float min, float max) {
+        if (Float.isNaN(v)) return min;
+        return Math.max(min, Math.min(max, v));
     }
 
     /**
