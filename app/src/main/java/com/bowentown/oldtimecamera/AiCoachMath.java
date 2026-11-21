@@ -656,7 +656,7 @@ public final class AiCoachMath {
 
     private static String resolveOptionalPresetId(String candidate) {
         if (candidate == null) return "";
-        String trimmed = candidate.trim().toLowerCase(Locale.US);
+        String trimmed = FilmPresets.normalizeId(candidate);
         if (trimmed.isEmpty()) return "";
         for (FilmPreset p : FilmPresets.all()) {
             if (p.id.equals(trimmed)) return p.id;

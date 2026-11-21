@@ -58,6 +58,7 @@ public final class DarkroomSheet {
         String[] paperLabels = {
                 context.getString(R.string.paper_ivory),
                 context.getString(R.string.paper_black),
+                context.getString(R.string.paper_exif),
                 context.getString(R.string.paper_sprocket),
                 context.getString(R.string.paper_none)
         };

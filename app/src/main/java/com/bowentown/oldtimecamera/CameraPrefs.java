@@ -41,8 +41,14 @@ public final class CameraPrefs {
     public enum PaperStyle {
         IVORY,
         BLACK,
+        EXIF_FRAME,
         SPROCKET_35MM,
         NONE;
+
+        public PaperStyle next() {
+            PaperStyle[] all = values();
+            return all[(ordinal() + 1) % all.length];
+        }
 
         public static PaperStyle fromName(String name) {
             for (PaperStyle p : values()) {
@@ -77,6 +83,11 @@ public final class CameraPrefs {
         RETRO_98,
         OFF;
 
+        public DateMode next() {
+            DateMode[] all = values();
+            return all[(ordinal() + 1) % all.length];
+        }
+
         public static DateMode fromName(String name) {
             for (DateMode d : values()) {
                 if (d.name().equals(name)) return d;
@@ -106,6 +117,7 @@ public final class CameraPrefs {
     private static final String KEY_GOLDEN_ROT = "golden_rot";
     private static final String KEY_SHOOT_MODE = "shoot_mode";
     private static final String KEY_BLACK_MIST = "black_mist";
+    private static final String KEY_SCENE_WB = "scene_wb_shift";
     private static final String KEY_SOUND = "shutter_sound";
     private static final String KEY_FRONT_MIRROR = "front_mirror";
     private static final String KEY_TIMER_SECONDS = "timer_seconds";
@@ -328,6 +340,17 @@ public final class CameraPrefs {
 
     public void setBlackMistEnabled(boolean enabled) {
         sp.edit().putBoolean(KEY_BLACK_MIST, enabled).apply();
+    }
+
+    public float getSceneWbShift() {
+        float raw = sp.getFloat(KEY_SCENE_WB, 0f);
+        if (Float.isNaN(raw)) return 0f;
+        return Math.max(-1f, Math.min(1f, raw));
+    }
+
+    public void setSceneWbShift(float wbShift) {
+        float clamped = Float.isNaN(wbShift) ? 0f : Math.max(-1f, Math.min(1f, wbShift));
+        sp.edit().putFloat(KEY_SCENE_WB, clamped).apply();
     }
 
     public FilmRecipe getFilmRecipe() {

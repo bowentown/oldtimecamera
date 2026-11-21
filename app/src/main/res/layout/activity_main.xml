@@ -172,42 +172,85 @@
                 android:shadowRadius="12"
                 android:visibility="gone" />
 
-            <!-- Optional EV slider drawer floating unobtrusively at bottom of stage -->
+            <!-- Optional EV + White Balance drawer floating unobtrusively at bottom of stage -->
             <LinearLayout
                 android:id="@+id/evPanel"
-                android:layout_width="244dp"
-                android:layout_height="36dp"
+                android:layout_width="276dp"
+                android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal"
                 android:layout_marginBottom="12dp"
-                android:background="@drawable/bg_hud_bar"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
+                android:background="@drawable/bg_sheet"
+                android:orientation="vertical"
                 android:paddingStart="12dp"
+                android:paddingTop="8dp"
                 android:paddingEnd="12dp"
+                android:paddingBottom="8dp"
                 android:visibility="gone">
 
-                <TextView
-                    style="@style/TextMonoCaption"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/ev_label" />
+                <LinearLayout
+                    android:id="@+id/evRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                <SeekBar
-                    android:id="@+id/evSeekBar"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:progressTint="@color/amber_led"
-                    android:thumbTint="@color/paper" />
+                    <TextView
+                        style="@style/TextMonoCaption"
+                        android:layout_width="34dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/ev_label"
+                        android:textColor="@color/paper_dim" />
 
-                <TextView
-                    android:id="@+id/evValueText"
-                    style="@style/TextMonoCaption"
-                    android:layout_width="40dp"
-                    android:layout_height="wrap_content"
-                    android:gravity="end"
-                    android:text="@string/ev_zero"
-                    android:textColor="@color/amber_led" />
+                    <SeekBar
+                        android:id="@+id/evSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:progressTint="@color/amber_led"
+                        android:thumbTint="@color/paper" />
+
+                    <TextView
+                        android:id="@+id/evValueText"
+                        style="@style/TextMonoCaption"
+                        android:layout_width="46dp"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical|end"
+                        android:text="@string/ev_zero"
+                        android:textColor="@color/amber_led" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        style="@style/TextMonoCaption"
+                        android:layout_width="34dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/wb_label"
+                        android:textColor="@color/paper_dim" />
+
+                    <SeekBar
+                        android:id="@+id/wbSeekBar"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="20"
+                        android:progress="10"
+                        android:progressTint="@color/amber_led"
+                        android:thumbTint="@color/paper" />
+
+                    <TextView
+                        android:id="@+id/wbValueText"
+                        style="@style/TextMonoCaption"
+                        android:layout_width="46dp"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical|end"
+                        android:text="5500K"
+                        android:textColor="@color/paper_soft" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- Inline Film Recipe drawer (long-press any stock chip) -->

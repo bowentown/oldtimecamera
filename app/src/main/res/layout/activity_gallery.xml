@@ -312,7 +312,7 @@
                 android:gravity="center"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingEnd="14dp">
+                android:paddingEnd="12dp">
 
                 <ImageView
                     android:layout_width="18dp"
@@ -324,8 +324,41 @@
                     style="@style/TextMonoLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="6dp"
                     android:text="@string/gallery_share" />
+            </LinearLayout>
+
+            <View
+                android:id="@+id/lightboxRedevelopDivider"
+                android:layout_width="1dp"
+                android:layout_height="16dp"
+                android:background="@color/hairline"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/lightboxRedevelop"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_hud_icon_button"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="17dp"
+                    android:layout_height="17dp"
+                    android:src="@drawable/ic_film_roll"
+                    android:tint="@color/paper" />
+
+                <TextView
+                    style="@style/TextMonoLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/gallery_redevelop"
+                    android:textColor="@color/paper" />
             </LinearLayout>
 
             <View

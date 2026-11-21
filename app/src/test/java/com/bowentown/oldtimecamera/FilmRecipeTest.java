@@ -23,22 +23,27 @@ public class FilmRecipeTest {
 
     @Test
     public void zeroIntensity_convergesLookTowardNeutralWhileRespectingWarmthAndGrain() {
-        FilmPreset vivid = FilmPresets.all()[4]; // vivid50: sat=1.30, contrast=1.18
+        FilmPreset stock = FilmPresets.all()[1]; // kd100 flagship stock
         FilmRecipe softNeutral = new FilmRecipe(0.0f, 0.5f, 0.0f);
-        FilmPreset derived = softNeutral.apply(vivid, "Soft Vivid");
+        FilmPreset derived = softNeutral.apply(stock, "Soft KD");
         assertNotNull(derived);
-        assertNotSame(vivid, derived);
-        assertEquals("Soft Vivid", derived.name);
+        assertNotSame(stock, derived);
+        assertEquals("Soft KD", derived.name);
         assertEquals(1.0f, derived.saturation, 1e-4f);
         assertEquals(1.0f, derived.contrast, 1e-4f);
         assertEquals(0.0f, derived.fade, 1e-4f);
         assertEquals(0.0f, derived.leak, 1e-4f);
+        assertEquals(0.0f, derived.lutStrength, 1e-4f);
+        assertEquals(0.0f, derived.chromaAberration, 1e-4f);
+        assertEquals(0.0f, derived.cornerSoftness, 1e-4f);
         assertEquals(0.006f, derived.grain, 1e-4f);
 
         FilmRecipe warmed = new FilmRecipe(0.5f, 1.5f, 0.8f);
-        FilmPreset warmDerived = warmed.apply(vivid);
+        FilmPreset warmDerived = warmed.apply(stock);
         assertTrue("Positive warmth boosts red channel over blue",
                 warmDerived.colorMatrix[0] > warmDerived.colorMatrix[8]);
+        assertTrue("Half intensity scales LUT strength", warmDerived.lutStrength > 0.4f
+                && warmDerived.lutStrength < stock.lutStrength);
         assertTrue("Grain multiplier scales smoothly", warmDerived.grain > derived.grain);
     }
 

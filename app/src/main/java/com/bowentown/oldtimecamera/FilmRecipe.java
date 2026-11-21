@@ -81,7 +81,7 @@ public final class FilmRecipe {
         float hal = base.halation * t;
 
         return FilmPreset.deriveColMajor(
-                base, customName, mat, off, sat, con, bri, fade, grain, vig, leak, hal);
+                base, customName, mat, off, sat, con, bri, fade, grain, vig, leak, hal, t);
     }
 
     public String toExifTag() {

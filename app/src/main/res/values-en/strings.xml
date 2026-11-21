@@ -29,6 +29,7 @@
     <string name="ev_pill_zero">EV 0</string>
     <string name="ev_label">EV</string>
     <string name="ev_zero">0.0</string>
+    <string name="wb_label">WB</string>
     <string name="close">Close</string>
 
     <string name="hint_mode_single">Single Frame</string>
@@ -58,6 +59,7 @@
 
     <string name="paper_ivory">Ivory</string>
     <string name="paper_black">Black</string>
+    <string name="paper_exif">EXIF</string>
     <string name="paper_sprocket">35mm</string>
     <string name="paper_none">None</string>
 
@@ -95,6 +97,7 @@
     <string name="hint_grid_crosshair">Crosshair</string>
     <string name="hint_grid_off">Grid off</string>
     <string name="hint_golden_rotated">Spiral rotated</string>
+    <string name="hint_comparing_original">Original</string>
 
     <string name="rotate_viewfinder">Rotate</string>
     <string name="rotation_auto">Auto</string>
@@ -124,12 +127,20 @@
     <string name="flash_off">OFF</string>
 
     <string name="editor_title">LAB</string>
+    <string name="editor_redevelop_title">RE-WASH</string>
+    <string name="editor_batch_title">BATCH · %1$d</string>
     <string name="editor_note_hint">Note…</string>
     <string name="editor_save">Develop</string>
+    <string name="editor_batch_save">Develop (%1$d)</string>
     <string name="editor_developing">Saving…</string>
+    <string name="editor_batch_progress">Developing %1$d / %2$d…</string>
+    <string name="editor_batch_done">Saved %1$d prints</string>
+    <string name="editor_batch_limit_toast">Up to %1$d photos per batch</string>
+    <string name="editor_hold_compare_hint">Press and hold preview to compare original</string>
     <string name="editor_load_failed">Read failed</string>
 
     <string name="gallery_title">ARCHIVE</string>
+    <string name="gallery_redevelop">Re-wash</string>
     <string name="gallery_empty">No frames yet</string>
     <string name="gallery_frames">%1$d</string>
     <string name="gallery_contact_sheet">SHEET</string>

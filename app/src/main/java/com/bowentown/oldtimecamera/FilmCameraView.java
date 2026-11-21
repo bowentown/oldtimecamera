@@ -16,7 +16,7 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * A GLSurfaceView that owns the camera SurfaceTexture, film renderer, and
- * viewfinder touch gestures (tap-to-focus & pinch-to-zoom).
+ * viewfinder touch gestures (tap-to-focus, pinch-to-zoom, swipe-film, and hold-to-compare).
  */
 public final class FilmCameraView extends GLSurfaceView {
 
@@ -29,6 +29,7 @@ public final class FilmCameraView extends GLSurfaceView {
         void onPinchZoom(float scaleFactor);
         default void onDoubleTapFlip() {}
         default void onSwipeFilm(int direction) {}
+        default void onCompareOriginalChanged(boolean comparing) {}
     }
 
     public interface OnRendererErrorListener {
@@ -45,6 +46,7 @@ public final class FilmCameraView extends GLSurfaceView {
     private volatile SurfaceTexture readyTexture;
     private int ratioW = 3, ratioH = 4;
     private boolean pinching = false;
+    private boolean comparingOriginal = false;
 
     public FilmCameraView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -63,7 +65,8 @@ public final class FilmCameraView extends GLSurfaceView {
 
             @Override
             public boolean onSingleTapConfirmed(MotionEvent e) {
-                if (!pinching && gestureListener != null && getWidth() > 0 && getHeight() > 0) {
+                if (!pinching && !comparingOriginal && gestureListener != null
+                        && getWidth() > 0 && getHeight() > 0) {
                     gestureListener.onTapFocus(e.getX(), e.getY(), getWidth(), getHeight());
                 }
                 return true;
@@ -71,15 +74,27 @@ public final class FilmCameraView extends GLSurfaceView {
 
             @Override
             public boolean onDoubleTap(MotionEvent e) {
-                if (!pinching && gestureListener != null) {
+                if (!pinching && !comparingOriginal && gestureListener != null) {
                     gestureListener.onDoubleTapFlip();
                 }
                 return true;
             }
 
             @Override
+            public void onLongPress(MotionEvent e) {
+                if (!pinching && !comparingOriginal) {
+                    comparingOriginal = true;
+                    renderer.setBypassFilm(true);
+                    if (gestureListener != null) {
+                        gestureListener.onCompareOriginalChanged(true);
+                    }
+                }
+            }
+
+            @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-                if (pinching || gestureListener == null || e1 == null || e2 == null || getWidth() <= 0) {
+                if (pinching || comparingOriginal || gestureListener == null
+                        || e1 == null || e2 == null || getWidth() <= 0) {
                     return false;
                 }
                 float dx = e2.getX() - e1.getX();
@@ -98,6 +113,7 @@ public final class FilmCameraView extends GLSurfaceView {
                     @Override
                     public boolean onScaleBegin(ScaleGestureDetector detector) {
                         pinching = true;
+                        stopComparingOriginal();
                         return true;
                     }
 
@@ -116,8 +132,26 @@ public final class FilmCameraView extends GLSurfaceView {
                 });
     }
 
+    private void stopComparingOriginal() {
+        if (comparingOriginal) {
+            comparingOriginal = false;
+            renderer.setBypassFilm(false);
+            if (gestureListener != null) {
+                gestureListener.onCompareOriginalChanged(false);
+            }
+        }
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (comparingOriginal) {
+                stopComparingOriginal();
+                scaleDetector.onTouchEvent(event);
+                return true;
+            }
+        }
         boolean handled = scaleDetector.onTouchEvent(event);
         if (!scaleDetector.isInProgress()) {
             handled |= tapDetector.onTouchEvent(event);
@@ -146,22 +180,18 @@ public final class FilmCameraView extends GLSurfaceView {
         if (l != null) l.onRendererError(message);
     }
 
-    /**
-     * Releases the camera SurfaceTexture and every GL object owned by the renderer.
-     * Called when the hosting activity is destroyed so repeated sessions do not leak
-     * a BufferQueue plus three shader programs each time.
-     */
     public void releaseResources() {
+        stopComparingOriginal();
         renderer.setHostResumed(false);
         try {
             queueEvent(renderer::releaseGlObjects);
         } catch (RuntimeException ignored) {
-            // GL thread already gone; nothing to release.
         }
     }
 
     @Override
     public void onPause() {
+        stopComparingOriginal();
         renderer.setHostResumed(false);
         super.onPause();
     }
@@ -196,6 +226,14 @@ public final class FilmCameraView extends GLSurfaceView {
 
     public void setBlackMistEnabled(boolean enabled) {
         renderer.setBlackMistEnabled(enabled);
+    }
+
+    public void setSceneWbShift(float wbShift) {
+        renderer.setSceneWbShift(wbShift);
+    }
+
+    public void setFlashActive(boolean active) {
+        renderer.setFlashActive(active);
     }
 
     public void setLeakSeed(float seed) {
@@ -246,7 +284,6 @@ public final class FilmCameraView extends GLSurfaceView {
         return ratioH > 0 ? (float) ratioW / (float) ratioH : 0.75f;
     }
 
-    /** Fit the viewfinder to the (rotated) camera buffer aspect ratio. */
     public void setAspectRatio(int width, int height) {
         if (width <= 0 || height <= 0) return;
         Runnable apply = () -> {
@@ -263,22 +300,16 @@ public final class FilmCameraView extends GLSurfaceView {
         }
     }
 
-    /**
-     * Apply the very same film shader to a captured or imported bitmap.
-     * Executed on the GL thread via a task queue drained in onDrawFrame.
-     */
-    public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
-                              boolean leakEnabled, float leakSeed) throws Exception {
-        return renderPhoto(source, preset, grainBoost, leakEnabled, false, leakSeed);
-    }
-
-    /**
-     * Apply the very same film shader (including optional Black Mist highlight bloom) to a
-     * captured or imported bitmap on the GL thread.
-     */
     public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
                               boolean leakEnabled, boolean blackMistEnabled,
                               float leakSeed) throws Exception {
+        return renderPhoto(source, preset, grainBoost, leakEnabled, blackMistEnabled,
+                0f, false, leakSeed);
+    }
+
+    public Bitmap renderPhoto(Bitmap source, FilmPreset preset, boolean grainBoost,
+                              boolean leakEnabled, boolean blackMistEnabled,
+                              float wbShift, boolean usedFlash, float leakSeed) throws Exception {
         if (!isAttachedToWindow()) {
             throw new IllegalStateException("Viewfinder is not attached");
         }
@@ -290,7 +321,8 @@ public final class FilmCameraView extends GLSurfaceView {
         final CountDownLatch latch = new CountDownLatch(1);
         renderer.postTask(() -> {
             try {
-                result[0] = renderer.renderPhoto(source, preset, grainBoost, leakEnabled, blackMistEnabled, leakSeed);
+                result[0] = renderer.renderPhoto(source, preset, grainBoost, leakEnabled,
+                        blackMistEnabled, wbShift, usedFlash, leakSeed);
             } catch (Throwable t) {
                 failure[0] = t;
             } finally {
@@ -309,7 +341,6 @@ public final class FilmCameraView extends GLSurfaceView {
         return result[0];
     }
 
-    /** Captures a lightweight preview snapshot on the GL thread without blocking capture hardware. */
     public Bitmap capturePreviewSnapshot(int maxEdge) {
         if (!isAttachedToWindow() || renderer.initError() != null) {
             return null;
@@ -336,7 +367,6 @@ public final class FilmCameraView extends GLSurfaceView {
         return result[0];
     }
 
-    /** Driver-safe maximum edge for a developed print, queried once the GL context exists. */
     public int getMaxRenderEdge() {
         return renderer.maxRenderEdge();
     }

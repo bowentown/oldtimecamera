@@ -243,6 +243,12 @@ public final class PhotoSaver {
             int footer = Math.round(shortSide * 0.062f);
             return new int[]{pad, footer, photoW + pad * 2, photoH + pad * 2 + footer};
         }
+        if (paperStyle == CameraPrefs.PaperStyle.EXIF_FRAME) {
+            int pad = Math.round(shortSide * 0.026f);
+            int footer = Math.round(shortSide
+                    * (aspect == CameraPrefs.AspectRatio.RATIO_XPAN ? 0.145f : 0.132f));
+            return new int[]{pad, footer, photoW + pad * 2, photoH + pad * 2 + footer};
+        }
         float padRatio;
         float footerRatio;
         if (aspect == CameraPrefs.AspectRatio.RATIO_1_1) {
@@ -289,8 +295,22 @@ public final class PhotoSaver {
                                     int frameNumber,
                                     String customNote,
                                     String exifTelemetry) {
+        return applyPaper(context, photo, preset, paperStyle, dateMode, aspect,
+                frameNumber, customNote, exifTelemetry, null);
+    }
+
+    /** Full print compositor supporting {@link CameraPrefs.PaperStyle#EXIF_FRAME} camera nameplate metadata. */
+    public static Bitmap applyPaper(Context context, Bitmap photo, FilmPreset preset,
+                                    CameraPrefs.PaperStyle paperStyle,
+                                    CameraPrefs.DateMode dateMode,
+                                    CameraPrefs.AspectRatio aspect,
+                                    int frameNumber,
+                                    String customNote,
+                                    String exifTelemetry,
+                                    ExifSpec exifSpec) {
         boolean hasFrame = paperStyle != null && paperStyle != CameraPrefs.PaperStyle.NONE;
-        String stampText = dateString(dateMode);
+        boolean exifNameplate = paperStyle == CameraPrefs.PaperStyle.EXIF_FRAME;
+        String stampText = exifNameplate ? "" : dateString(dateMode);
         boolean hasStamp = !stampText.isEmpty();
         if (!hasFrame && !hasStamp) return photo;
 
@@ -310,7 +330,8 @@ public final class PhotoSaver {
 
         boolean sprocket = paperStyle == CameraPrefs.PaperStyle.SPROCKET_35MM;
         boolean darkPaper = sprocket || paperStyle == CameraPrefs.PaperStyle.BLACK;
-        int bgColor = sprocket ? 0xFF13110F : (darkPaper ? 0xFF171513 : preset.paperColor);
+        int bgColor = sprocket ? 0xFF13110F
+                : (darkPaper ? 0xFF171513 : (exifNameplate ? 0xFFF6F2E9 : preset.paperColor));
         canvas.drawColor(bgColor);
         canvas.drawBitmap(photo, pad, pad, null);
 
@@ -319,7 +340,7 @@ public final class PhotoSaver {
             // Crisp hairline around the photograph so light skies separate cleanly from paper.
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(Math.max(1f, shortSide * 0.0014f));
-            paint.setColor(darkPaper ? 0x33EFE7D6 : 0x1A1A1714);
+            paint.setColor(darkPaper ? 0x33EFE7D6 : 0x1E1A1714);
             canvas.drawRect(pad, pad, pad + w, pad + h, paint);
             paint.setStyle(Paint.Style.FILL);
         }
@@ -339,7 +360,10 @@ public final class PhotoSaver {
             paint.clearShadowLayer();
         }
 
-        if (hasFrame) {
+        if (exifNameplate) {
+            drawExifNameplateFooter(canvas, paint, pad, w, h, outH, shortSide,
+                    preset, dateMode, frameNumber, customNote, exifTelemetry, exifSpec);
+        } else if (hasFrame) {
             int inkColor = sprocket ? 0xFFD99A4E : (darkPaper ? 0xFFB0A695 : 0xFF7D705C);
             float baseY = sprocket
                     ? (pad + h + (outH - (pad + h)) * 0.36f)
@@ -364,6 +388,104 @@ public final class PhotoSaver {
             }
         }
         return out;
+    }
+
+    private static void drawExifNameplateFooter(Canvas canvas, Paint paint,
+                                                int pad, int w, int h, int outH, int shortSide,
+                                                FilmPreset preset, CameraPrefs.DateMode dateMode,
+                                                int frameNumber, String customNote,
+                                                String exifTelemetry, ExifSpec exifSpec) {
+        float bandTop = pad + h;
+        float bandH = outH - bandTop;
+        float row1Y = bandTop + bandH * 0.44f;
+        float row2Y = bandTop + bandH * 0.77f;
+
+        String fallbackIso = preset != null ? preset.isoTag : "400";
+        String specLine;
+        if (exifSpec != null) {
+            specLine = exifSpec.toSpecLine(fallbackIso);
+        } else if (exifTelemetry != null && !exifTelemetry.trim().isEmpty()) {
+            specLine = exifTelemetry.trim();
+        } else {
+            specLine = "35mm  ·  ISO " + fallbackIso;
+        }
+
+        String subRight;
+        if (exifSpec != null && !exifSpec.cameraLabel().isEmpty()) {
+            subRight = exifSpec.cameraLabel();
+        } else {
+            subRight = String.format(Locale.US, "35MM FILM  ·  ISO %s", fallbackIso);
+        }
+
+        // Right column first so we know exact remaining width for the left title/subline.
+        paint.setFakeBoldText(true);
+        paint.setTextAlign(Paint.Align.RIGHT);
+        paint.setColor(0xFF1C1917);
+        paint.setTextSize(Math.max(12f, shortSide * 0.0225f));
+        float rightX = pad + w;
+        canvas.drawText(specLine, rightX, row1Y, paint);
+        float rightTopWidth = paint.measureText(specLine);
+
+        paint.setFakeBoldText(false);
+        paint.setColor(0xFF9A6B3B);
+        paint.setTextSize(Math.max(10f, shortSide * 0.0178f));
+        canvas.drawText(subRight, rightX, row2Y, paint);
+        float rightBotWidth = paint.measureText(subRight);
+
+        float rightOccupied = Math.max(rightTopWidth, rightBotWidth);
+        float dividerGap = shortSide * 0.024f;
+        float divX = rightX - rightOccupied - dividerGap;
+        if (divX > pad + w * 0.34f) {
+            paint.setStrokeWidth(Math.max(1f, shortSide * 0.0014f));
+            paint.setColor(0x241C1917);
+            canvas.drawLine(divX, bandTop + bandH * 0.22f, divX, bandTop + bandH * 0.84f, paint);
+        }
+
+        // Emblem vermilion dot + bold stock/title on left row 1.
+        float dotR = Math.max(3f, shortSide * 0.0068f);
+        float dotCx = pad + dotR;
+        float dotCy = row1Y - shortSide * 0.0080f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xFFD25A34);
+        canvas.drawCircle(dotCx, dotCy, dotR, paint);
+
+        float leftX = dotCx + dotR + shortSide * 0.012f;
+        float maxLeftW = Math.max(shortSide * 0.22f, (divX - dividerGap) - leftX);
+        String stockTitle = preset != null ? preset.name : "OLD TIME";
+        String note = customNote == null ? "" : customNote.trim();
+        String title = note.isEmpty() ? stockTitle : (stockTitle + "  ·  " + note);
+
+        paint.setFakeBoldText(true);
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setColor(0xFF1C1917);
+        paint.setTextSize(Math.max(12f, shortSide * 0.0240f));
+        canvas.drawText(ellipsizeToWidth(paint, title, maxLeftW), leftX, row1Y, paint);
+
+        // Left row 2: film signature + frame number + capture date.
+        paint.setFakeBoldText(false);
+        paint.setColor(0xFF787066);
+        paint.setTextSize(Math.max(10f, shortSide * 0.0182f));
+        StringBuilder subLeft = new StringBuilder("OLD TIME");
+        if (frameNumber > 0) {
+            subLeft.append(String.format(Locale.US, "  ·  NO.%02d", frameNumber));
+        }
+        String capDate = formatExifCaptureDate(
+                exifSpec != null ? exifSpec.dateTimeRaw : null, dateMode);
+        if (!capDate.isEmpty()) {
+            subLeft.append("  ·  ").append(capDate);
+        }
+        canvas.drawText(ellipsizeToWidth(paint, subLeft.toString(),
+                Math.max(shortSide * 0.24f, (divX - dividerGap) - pad)), pad, row2Y, paint);
+    }
+
+    private static String ellipsizeToWidth(Paint paint, String text, float maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0f) return "";
+        if (paint.measureText(text) <= maxWidth) return text;
+        int len = text.length();
+        while (len > 1 && paint.measureText(text, 0, len) + paint.measureText("…") > maxWidth) {
+            len--;
+        }
+        return text.substring(0, len).trim() + "…";
     }
 
     private static void draw35mmSprockets(Canvas canvas, Paint paint, int outW, int outH,
@@ -564,11 +686,11 @@ public final class PhotoSaver {
     }
 
     public static Uri save(Context context, Bitmap bitmap) throws IOException {
-        return save(context, bitmap, null, null);
+        return save(context, bitmap, null, null, null);
     }
 
     public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg) throws IOException {
-        return save(context, bitmap, sourceExifJpeg, null);
+        return save(context, bitmap, sourceExifJpeg, null, null);
     }
 
     /**
@@ -578,6 +700,15 @@ public final class PhotoSaver {
      */
     public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg,
                            String recipeComment) throws IOException {
+        return save(context, bitmap, sourceExifJpeg, null, recipeComment);
+    }
+
+    /**
+     * Writes the print into the system gallery, optionally copying EXIF camera attributes from
+     * either raw JPEG bytes or an imported source {@link Uri}.
+     */
+    public static Uri save(Context context, Bitmap bitmap, byte[] sourceExifJpeg,
+                           Uri sourceExifUri, String recipeComment) throws IOException {
         String name = "OTC_"
                 + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date())
                 + ".jpg";
@@ -596,7 +727,7 @@ public final class PhotoSaver {
                         throw new IOException("JPEG compression failed");
                     }
                 }
-                applyAnalogExif(tempFile, sourceExifJpeg, recipeComment);
+                applyAnalogExif(context, tempFile, sourceExifJpeg, sourceExifUri, recipeComment);
             }
 
             if (Build.VERSION.SDK_INT >= 29) {
@@ -647,7 +778,7 @@ public final class PhotoSaver {
                 }
             }
             if (tempFile == null) {
-                applyAnalogExif(file, sourceExifJpeg, recipeComment);
+                applyAnalogExif(context, file, sourceExifJpeg, sourceExifUri, recipeComment);
             }
             MediaScannerConnection.scanFile(context,
                     new String[]{file.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
@@ -660,6 +791,25 @@ public final class PhotoSaver {
                 tempFile.delete();
             }
         }
+    }
+
+    /** Resolves the persisted MediaStore {@code DISPLAY_NAME} (or file basename) of a saved print. */
+    public static String resolveDisplayName(Context context, Uri uri) {
+        if (uri == null) return "";
+        if (context != null && "content".equals(uri.getScheme())) {
+            try (Cursor c = context.getContentResolver().query(
+                    uri, new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    String dn = c.getString(0);
+                    if (dn != null && !dn.trim().isEmpty()) {
+                        return dn.trim();
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        String last = uri.getLastPathSegment();
+        return last != null ? last : "";
     }
 
     public static String fileProviderAuthority(Context context) {
@@ -714,30 +864,173 @@ public final class PhotoSaver {
         return sb.toString();
     }
 
+    /** Structured EXIF metadata snapshot for {@link CameraPrefs.PaperStyle#EXIF_FRAME}. */
+    public static final class ExifSpec {
+        public final String focal35mmRaw;
+        public final String focalRaw;
+        public final String fNumberRaw;
+        public final String exposureSecRaw;
+        public final String isoRaw;
+        public final String dateTimeRaw;
+        public final String makeRaw;
+        public final String modelRaw;
+
+        public ExifSpec(String focal35mmRaw, String focalRaw, String fNumberRaw,
+                        String exposureSecRaw, String isoRaw, String dateTimeRaw,
+                        String makeRaw, String modelRaw) {
+            this.focal35mmRaw = focal35mmRaw;
+            this.focalRaw = focalRaw;
+            this.fNumberRaw = fNumberRaw;
+            this.exposureSecRaw = exposureSecRaw;
+            this.isoRaw = isoRaw;
+            this.dateTimeRaw = dateTimeRaw;
+            this.makeRaw = makeRaw;
+            this.modelRaw = modelRaw;
+        }
+
+        public String toSpecLine(String fallbackIsoTag) {
+            return formatExifSpecLine(focal35mmRaw, focalRaw, fNumberRaw,
+                    exposureSecRaw, isoRaw, fallbackIsoTag);
+        }
+
+        public String cameraLabel() {
+            String make = makeRaw == null ? "" : makeRaw.trim();
+            String model = modelRaw == null ? "" : modelRaw.trim();
+            if (model.isEmpty() && make.isEmpty()) return "";
+            String combined;
+            if (model.isEmpty()) {
+                combined = make;
+            } else if (make.isEmpty()
+                    || model.toUpperCase(Locale.US).startsWith(make.toUpperCase(Locale.US))) {
+                combined = model;
+            } else {
+                combined = make + " " + model;
+            }
+            combined = combined.toUpperCase(Locale.US).replaceAll("\\s+", " ").trim();
+            if (combined.length() > 26) {
+                combined = combined.substring(0, 25).trim() + "…";
+            }
+            return combined;
+        }
+    }
+
+    /** Parses decimal or EXIF rational ({@code "num/den"}) numbers, returning {@code -1} if invalid. */
+    public static double parseExifNumber(String raw) {
+        if (raw == null) return -1.0;
+        String s = raw.trim();
+        if (s.isEmpty()) return -1.0;
+        int comma = s.indexOf(',');
+        if (comma > 0) s = s.substring(0, comma).trim();
+        int slash = s.indexOf('/');
+        try {
+            if (slash > 0) {
+                double num = Double.parseDouble(s.substring(0, slash).trim());
+                double den = Double.parseDouble(s.substring(slash + 1).trim());
+                return den > 0.0 ? (num / den) : -1.0;
+            }
+            return Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            return -1.0;
+        }
+    }
+
+    /** Pure-Java magazine camera spec formatter: {@code "26mm  f/1.8  1/120s  ISO 200"}. */
+    public static String formatExifSpecLine(String focal35mmRaw, String focalRaw,
+                                            String fNumberRaw, String exposureSecRaw,
+                                            String isoRaw, String fallbackIsoTag) {
+        List<String> parts = new ArrayList<>(4);
+        double f35 = parseExifNumber(focal35mmRaw);
+        double fPhys = parseExifNumber(focalRaw);
+        if (f35 >= 8.0 && f35 <= 800.0) {
+            parts.add(Math.round(f35) + "mm");
+        } else if (fPhys > 0.5 && fPhys <= 800.0) {
+            if (fPhys >= 11.5 || Math.abs(fPhys - Math.round(fPhys)) < 0.06) {
+                parts.add(Math.round(fPhys) + "mm");
+            } else {
+                parts.add(String.format(Locale.US, "%.1fmm", fPhys));
+            }
+        }
+
+        double fn = parseExifNumber(fNumberRaw);
+        if (fn > 0.5 && fn < 64.0) {
+            parts.add(String.format(Locale.US, "f/%.1f", fn));
+        }
+
+        double sec = parseExifNumber(exposureSecRaw);
+        if (sec > 0.0 && sec < 0.75) {
+            long denom = Math.max(1L, Math.round(1.0 / sec));
+            parts.add("1/" + denom + "s");
+        } else if (sec >= 0.75 && sec < 3600.0) {
+            parts.add(String.format(Locale.US, "%.1fs", sec));
+        }
+
+        boolean hasOpticalTag = !parts.isEmpty();
+        String isoPart = "";
+        if (isoRaw != null && !isoRaw.trim().isEmpty()) {
+            String cleanIso = isoRaw.trim().split(",")[0].trim();
+            if (!cleanIso.isEmpty()) {
+                isoPart = "ISO " + cleanIso;
+            }
+        }
+        if (isoPart.isEmpty() && hasOpticalTag
+                && fallbackIsoTag != null && !fallbackIsoTag.trim().isEmpty()) {
+            String tag = fallbackIsoTag.trim();
+            if (Character.isDigit(tag.charAt(0))) {
+                isoPart = "ISO " + tag;
+            }
+        }
+        if (!isoPart.isEmpty()) {
+            parts.add(isoPart);
+        }
+
+        if (parts.isEmpty()) {
+            String fb = (fallbackIsoTag != null && !fallbackIsoTag.trim().isEmpty())
+                    ? fallbackIsoTag.trim() : "400";
+            return "35mm  ·  " + (Character.isDigit(fb.charAt(0)) ? "ISO " + fb : fb);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) sb.append("  ");
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
+    /** Formats capture timestamp for {@link CameraPrefs.PaperStyle#EXIF_FRAME}, honoring DateMode. */
+    public static String formatExifCaptureDate(String exifDateTimeRaw, CameraPrefs.DateMode dateMode) {
+        if (dateMode == CameraPrefs.DateMode.OFF) return "";
+        if (exifDateTimeRaw != null) {
+            String s = exifDateTimeRaw.trim();
+            // Standard EXIF format: "YYYY:MM:DD HH:MM:SS"
+            if (s.length() >= 16 && s.charAt(4) == ':' && s.charAt(7) == ':') {
+                String yyyy = dateMode == CameraPrefs.DateMode.RETRO_98 ? "1998" : s.substring(0, 4);
+                String mm = s.substring(5, 7);
+                String dd = s.substring(8, 10);
+                String hhmm = s.substring(11, 16);
+                return yyyy + "." + mm + "." + dd + " " + hhmm;
+            }
+        }
+        Date now = new Date();
+        if (dateMode == CameraPrefs.DateMode.RETRO_98) {
+            return "1998." + new SimpleDateFormat("MM.dd HH:mm", Locale.US).format(now);
+        }
+        return new SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.US).format(now);
+    }
+
     /** Pure-Java formatter turning raw EXIF strings into a compact analog meter line. */
     public static String formatShortExifStrings(String exposureSecRaw, String fNumberRaw, String isoRaw) {
         StringBuilder sb = new StringBuilder();
-        if (exposureSecRaw != null && !exposureSecRaw.trim().isEmpty()) {
-            try {
-                double sec = Double.parseDouble(exposureSecRaw.trim());
-                if (sec > 0.0 && sec < 0.75) {
-                    long denom = Math.max(1L, Math.round(1.0 / sec));
-                    sb.append("1/").append(denom).append('s');
-                } else if (sec >= 0.75) {
-                    sb.append(String.format(Locale.US, "%.1fs", sec));
-                }
-            } catch (NumberFormatException ignored) {
-            }
+        double sec = parseExifNumber(exposureSecRaw);
+        if (sec > 0.0 && sec < 0.75) {
+            long denom = Math.max(1L, Math.round(1.0 / sec));
+            sb.append("1/").append(denom).append('s');
+        } else if (sec >= 0.75) {
+            sb.append(String.format(Locale.US, "%.1fs", sec));
         }
-        if (fNumberRaw != null && !fNumberRaw.trim().isEmpty()) {
-            try {
-                double fn = Double.parseDouble(fNumberRaw.trim());
-                if (fn > 0.0) {
-                    if (sb.length() > 0) sb.append(" · ");
-                    sb.append(String.format(Locale.US, "f/%.1f", fn));
-                }
-            } catch (NumberFormatException ignored) {
-            }
+        double fn = parseExifNumber(fNumberRaw);
+        if (fn > 0.0) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(String.format(Locale.US, "f/%.1f", fn));
         }
         if (isoRaw != null && !isoRaw.trim().isEmpty()) {
             String cleanIso = isoRaw.trim().split(",")[0].trim();
@@ -747,6 +1040,50 @@ public final class PhotoSaver {
             }
         }
         return sb.toString();
+    }
+
+    private static ExifSpec readExifSpecFromInterface(android.media.ExifInterface src) {
+        if (src == null) return null;
+        String dt = src.getAttribute(android.media.ExifInterface.TAG_DATETIME_ORIGINAL);
+        if (dt == null || dt.trim().isEmpty()) {
+            dt = src.getAttribute(android.media.ExifInterface.TAG_DATETIME);
+        }
+        return new ExifSpec(
+                src.getAttribute(android.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM),
+                src.getAttribute(android.media.ExifInterface.TAG_FOCAL_LENGTH),
+                src.getAttribute(android.media.ExifInterface.TAG_F_NUMBER),
+                src.getAttribute(android.media.ExifInterface.TAG_EXPOSURE_TIME),
+                src.getAttribute(android.media.ExifInterface.TAG_ISO_SPEED_RATINGS),
+                dt,
+                src.getAttribute(android.media.ExifInterface.TAG_MAKE),
+                src.getAttribute(android.media.ExifInterface.TAG_MODEL));
+    }
+
+    public static ExifSpec extractExifSpec(byte[] sourceExifJpeg) {
+        if (sourceExifJpeg == null || sourceExifJpeg.length == 0) return null;
+        try {
+            return readExifSpecFromInterface(new android.media.ExifInterface(
+                    new java.io.ByteArrayInputStream(sourceExifJpeg)));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public static ExifSpec extractExifSpec(Context context, Uri uri) {
+        if (context == null || uri == null) return null;
+        if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+            try {
+                return readExifSpecFromInterface(new android.media.ExifInterface(uri.getPath()));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+            if (is == null) return null;
+            return readExifSpecFromInterface(new android.media.ExifInterface(is));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     public static String extractShortExifTelemetry(byte[] sourceExifJpeg) {
@@ -777,31 +1114,55 @@ public final class PhotoSaver {
         }
     }
 
-    private static void applyAnalogExif(File outFile, byte[] sourceExifJpeg, String recipeComment) {
+    /** Copies camera EXIF metadata onto a cached master negative file in {@link NegativeVault}. */
+    public static void copyCameraExifToNegative(File negFile, byte[] sourceExifJpeg) {
+        if (negFile == null || !negFile.isFile()) return;
+        applyAnalogExif(null, negFile, sourceExifJpeg, null, null);
+    }
+
+    private static final String[] COPYABLE_EXIF_TAGS = {
+            android.media.ExifInterface.TAG_MAKE,
+            android.media.ExifInterface.TAG_MODEL,
+            android.media.ExifInterface.TAG_DATETIME,
+            android.media.ExifInterface.TAG_DATETIME_ORIGINAL,
+            android.media.ExifInterface.TAG_DATETIME_DIGITIZED,
+            android.media.ExifInterface.TAG_EXPOSURE_TIME,
+            android.media.ExifInterface.TAG_F_NUMBER,
+            android.media.ExifInterface.TAG_ISO_SPEED_RATINGS,
+            android.media.ExifInterface.TAG_FOCAL_LENGTH,
+            android.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+            android.media.ExifInterface.TAG_WHITE_BALANCE,
+            android.media.ExifInterface.TAG_FLASH
+    };
+
+    private static void copyTags(android.media.ExifInterface src, android.media.ExifInterface dst) {
+        if (src == null || dst == null) return;
+        for (String tag : COPYABLE_EXIF_TAGS) {
+            String value = src.getAttribute(tag);
+            if (value != null && !value.isEmpty()) {
+                dst.setAttribute(tag, value);
+            }
+        }
+    }
+
+    private static void applyAnalogExif(Context context, File outFile,
+                                        byte[] sourceExifJpeg, Uri sourceExifUri,
+                                        String recipeComment) {
         try {
             android.media.ExifInterface outExif =
                     new android.media.ExifInterface(outFile.getAbsolutePath());
             if (sourceExifJpeg != null && sourceExifJpeg.length > 0) {
-                android.media.ExifInterface src = new android.media.ExifInterface(
-                        new java.io.ByteArrayInputStream(sourceExifJpeg));
-                String[] tags = {
-                        android.media.ExifInterface.TAG_MAKE,
-                        android.media.ExifInterface.TAG_MODEL,
-                        android.media.ExifInterface.TAG_DATETIME,
-                        android.media.ExifInterface.TAG_DATETIME_ORIGINAL,
-                        android.media.ExifInterface.TAG_DATETIME_DIGITIZED,
-                        android.media.ExifInterface.TAG_EXPOSURE_TIME,
-                        android.media.ExifInterface.TAG_F_NUMBER,
-                        android.media.ExifInterface.TAG_ISO_SPEED_RATINGS,
-                        android.media.ExifInterface.TAG_FOCAL_LENGTH,
-                        android.media.ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-                        android.media.ExifInterface.TAG_WHITE_BALANCE,
-                        android.media.ExifInterface.TAG_FLASH
-                };
-                for (String tag : tags) {
-                    String value = src.getAttribute(tag);
-                    if (value != null && !value.isEmpty()) {
-                        outExif.setAttribute(tag, value);
+                copyTags(new android.media.ExifInterface(
+                        new java.io.ByteArrayInputStream(sourceExifJpeg)), outExif);
+            } else if (sourceExifUri != null) {
+                if ("file".equals(sourceExifUri.getScheme()) && sourceExifUri.getPath() != null) {
+                    copyTags(new android.media.ExifInterface(sourceExifUri.getPath()), outExif);
+                } else if (context != null) {
+                    try (InputStream is = context.getContentResolver().openInputStream(sourceExifUri)) {
+                        if (is != null) {
+                            copyTags(new android.media.ExifInterface(is), outExif);
+                        }
+                    } catch (Exception ignored) {
                     }
                 }
             }

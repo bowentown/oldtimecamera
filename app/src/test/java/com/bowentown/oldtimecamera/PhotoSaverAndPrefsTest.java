@@ -181,7 +181,7 @@ public class PhotoSaverAndPrefsTest {
     public void recipeCommentRecordsStockAndFrameWithoutPersonalData() {
         String comment = PhotoSaver.buildRecipeComment(
                 FilmPresets.all()[1], true, false, 3, 7, 450);
-        assertTrue(comment.contains("stock=warm400"));
+        assertTrue(comment.contains("stock=kd100"));
         assertTrue(comment.contains("grain=boost"));
         assertTrue(comment.contains("leak=off"));
         assertTrue(comment.contains("roll=03"));
@@ -252,6 +252,32 @@ public class PhotoSaverAndPrefsTest {
         assertEquals("1/125s · f/1.8 · ISO 200",
                 PhotoSaver.formatShortExifStrings("0.008", "1.8", "200, 200"));
         assertEquals("", PhotoSaver.formatShortExifStrings(null, "bad", ""));
+
+        // Legacy v1.x stock ID aliasing
+        assertEquals("kd100", FilmPresets.normalizeId("vivid50"));
+        assertEquals("cpm35", FilmPresets.normalizeId("vintage64"));
+        assertEquals("fxn400", FilmPresets.normalizeId("cool400"));
+        assertEquals("hardbw400", FilmPresets.normalizeId("softbw400"));
+        assertEquals(FilmPresets.indexOfId("kd100"), FilmPresets.indexOfId("vivid50"));
+
+        // EXIF_FRAME geometry & nameplate spec formatting
+        assertEquals(5, CameraPrefs.PaperStyle.values().length);
+        int[] exifGeo = PhotoSaver.computePaperGeometry(1200, 1600,
+                CameraPrefs.PaperStyle.EXIF_FRAME, CameraPrefs.AspectRatio.RATIO_3_4);
+        assertEquals(31, exifGeo[0]);
+        assertEquals(158, exifGeo[1]);
+        assertEquals("26mm  f/1.8  1/125s  ISO 200",
+                PhotoSaver.formatExifSpecLine("26", "5400/1000", "18/10", "0.008", "200", "100"));
+        assertEquals("5.4mm  f/2.0  ISO 400",
+                PhotoSaver.formatExifSpecLine("", "5400/1000", "2.0", "", "", "400"));
+        assertEquals("35mm  ·  ISO 100",
+                PhotoSaver.formatExifSpecLine(null, null, null, null, null, "100"));
+        assertEquals("2026.11.21 22:25",
+                PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.TODAY));
+        assertEquals("1998.11.21 22:25",
+                PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.RETRO_98));
+        assertEquals("",
+                PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.OFF));
 
         String extComment = PhotoSaver.buildRecipeComment(
                 FilmPresets.all()[1], false, true, 2, 14, 0,

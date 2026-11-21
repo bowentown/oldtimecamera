@@ -60,11 +60,11 @@ public class AiCoachMathTest {
         AiCoachMath.AiAdvice a = AiCoachMath.parseAdvice(rawJson, true);
         assertEquals("后方强光顶板干扰且低机位仰拍", a.diagnosis);
         assertEquals("手机举至眉心微俯拍，人向左转35°避开格子墙", a.action);
-        assertEquals("softbw400", a.recommendedPresetId);
+        assertEquals("hardbw400", a.recommendedPresetId);
         assertEquals(-0.7f, a.evDelta, 0.01f);
         assertEquals(CompositionMath.GridMode.THIRDS, a.recommendedGrid);
         assertTrue(a.hasCameraTweaks("warm400", CompositionMath.GridMode.OFF));
-        assertFalse(a.hasActionablePresetChange("softbw400"));
+        assertFalse(a.hasActionablePresetChange("hardbw400"));
 
         // Unknown stock ID is dropped instead of switching randomly; evDelta is clamped cleanly.
         String bogus = "{\"diagnosis\":\"逆光过暗\",\"action\":\"侧转迎光\",\"recommendedPresetId\":\"fake_stock\",\"evDelta\":9.5,\"recommendedGrid\":\"BOGUS\"}";
@@ -99,7 +99,7 @@ public class AiCoachMathTest {
         String badStock = "{\"basePresetId\":\"kodak_fake\",\"name\":\"Test\",\"intensity\":0.5,\"grainScale\":-1,\"warmth\":5,\"blackMist\":false}";
         AiCoachMath.AiRecipeProposal fallback = AiCoachMath.parseRecipeProposal(badStock, "coolcast400", false);
         assertNotNull(fallback);
-        assertEquals("coolcast400", fallback.basePresetId);
+        assertEquals("fxn400", fallback.basePresetId);
         assertEquals(0.0f, fallback.recipe.grainScale, 0.001f);
         assertEquals(1.0f, fallback.recipe.warmth, 0.001f);
         assertFalse(fallback.blackMist);

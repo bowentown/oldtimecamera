@@ -3,6 +3,9 @@ package com.bowentown.oldtimecamera;
 import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.SurfaceTexture;
+import android.opengl.EGL14;
+import android.opengl.EGLDisplay;
+import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
@@ -20,9 +23,9 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
- * Renders the CameraX preview through one film shader, and renders captured
- * JPEGs (and imported darkroom photos) through the *same* shader off-screen
- * so the saved print matches the live viewfinder.
+ * Renders the CameraX preview through a unified 3D HaldCLUT + disposable lens optics shader,
+ * and renders captured JPEGs, re-developed negatives, and batch-imported photos through the
+ * exact same shader off-screen (either on the live GL thread or via {@link OffscreenSession}).
  */
 final class GLFilmRenderer implements GLSurfaceView.Renderer,
         SurfaceTexture.OnFrameAvailableListener {
@@ -49,6 +52,13 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     );
 
     private static final String FILM_UNIFORMS = String.join("\n",
+            "uniform sampler2D uLutTex;",
+            "uniform float uLutStrength;",
+            "uniform vec3 uWbGain;",
+            "uniform float uChromaAberration;",
+            "uniform float uCornerSoftness;",
+            "uniform float uFlashPop;",
+            "uniform float uBypassFilm;",
             "uniform mat3 uColorMatrix;",
             "uniform vec3 uColorOffset;",
             "uniform float uSaturation;",
@@ -84,6 +94,28 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( 0.0,  s2.y)).rgb - vec3(0.66)) * 0.7;",
             "    bloom += max(vec3(0.0), texture2D(uTexture, uv + vec2( 0.0, -s2.y)).rgb - vec3(0.66)) * 0.7;",
             "    return clamp(src + bloom * (0.28 * uMist), 0.0, 1.0);",
+            "}",
+            "vec3 sampleLensAndMist(vec2 texUv, vec2 screenUv) {",
+            "    vec3 base = texture2D(uTexture, texUv).rgb;",
+            "    if (uBypassFilm > 0.5) return base;",
+            "    vec2 frameUv = (screenUv - 0.5) / max(uFrameScale, vec2(0.01)) + 0.5;",
+            "    vec2 rVec = clamp(frameUv, 0.0, 1.0) - vec2(0.5);",
+            "    float r2 = dot(rVec, rVec);",
+            "    vec3 col = base;",
+            "    if (uChromaAberration > 0.001 && r2 > 0.018) {",
+            "        vec2 caShift = rVec * (r2 * uChromaAberration * 0.015);",
+            "        float rCh = texture2D(uTexture, clamp(texUv + caShift, 0.001, 0.999)).r;",
+            "        float bCh = texture2D(uTexture, clamp(texUv - caShift, 0.001, 0.999)).b;",
+            "        col = vec3(rCh, base.g, bCh);",
+            "    }",
+            "    if (uCornerSoftness > 0.001 && r2 > 0.05) {",
+            "        float edgeAmt = smoothstep(0.05, 0.44, r2) * uCornerSoftness * 0.46;",
+            "        vec2 tang = vec2(-rVec.y, rVec.x) * (uMistStep * 2.3);",
+            "        vec3 soft = 0.5 * (texture2D(uTexture, clamp(texUv + tang, 0.001, 0.999)).rgb",
+            "                         + texture2D(uTexture, clamp(texUv - tang, 0.001, 0.999)).rgb);",
+            "        col = mix(col, soft, edgeAmt);",
+            "    }",
+            "    return applyMist(col, texUv);",
             "}"
     );
 
@@ -92,42 +124,69 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             "    vec2 q = mod(p, 512.0);",
             "    return fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453);",
             "}",
+            "vec3 applyLut3D(vec3 col) {",
+            "    vec3 cl = clamp(col, 0.0, 1.0);",
+            "    float blueSlice = cl.b * 15.0;",
+            "    float slice0 = floor(blueSlice);",
+            "    float slice1 = min(15.0, slice0 + 1.0);",
+            "    float bf = blueSlice - slice0;",
+            "    float rOff = cl.r * 15.0 + 0.5;",
+            "    float v = (cl.g * 15.0 + 0.5) / 16.0;",
+            "    vec3 c0 = texture2D(uLutTex, vec2((slice0 * 16.0 + rOff) / 256.0, v)).rgb;",
+            "    vec3 c1 = texture2D(uLutTex, vec2((slice1 * 16.0 + rOff) / 256.0, v)).rgb;",
+            "    return mix(c0, c1, bf);",
+            "}",
             "vec3 filmColor(vec3 src, vec2 screenUv) {",
+            "    if (uBypassFilm > 0.5) return clamp(src, 0.0, 1.0);",
             "    vec2 frameUv = (screenUv - 0.5) / max(uFrameScale, vec2(0.01)) + 0.5;",
             "    vec2 uv = clamp(frameUv, 0.0, 1.0);",
-            "    vec3 c = clamp(uColorMatrix * src + uColorOffset, 0.0, 1.0);",
+            "    vec3 wbSrc = clamp(src * uWbGain, 0.0, 1.0);",
+            "    vec3 c = clamp(uColorMatrix * wbSrc + uColorOffset, 0.0, 1.0);",
+            "    if (uLutStrength > 0.001) {",
+            "        c = mix(c, applyLut3D(c), uLutStrength);",
+            "    }",
             "    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));",
             "    c = mix(vec3(lum), c, uSaturation);",
             "    c = clamp((c - 0.5) * uContrast + 0.5 + uBrightness, 0.0, 1.0);",
             "    vec3 sCurve = c * c * (3.0 - 2.0 * c);",
-            "    c = mix(c, sCurve, 0.22);",
-            "    c = c * (1.0 - uFade * 0.11) + vec3(uFade * 0.052) * (1.0 - c * 0.6);",
+            "    c = mix(c, sCurve, 0.16);",
+            "    c = c * (1.0 - uFade * 0.075) + vec3(uFade * 0.028) * (1.0 - c * 0.65);",
             "    if (uGrayscale > 0.5) {",
-            "        float g = dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114));",
-            "        c = vec3(g) * vec3(1.012, 1.0, 0.980);",
+            "        float g = dot(clamp(c, 0.0, 1.0), vec3(0.28, 0.60, 0.12));",
+            "        c = vec3(g) * vec3(1.014, 1.0, 0.982);",
+            "    }",
+            "    vec2 p = uv - 0.5;",
+            "    if (uFlashPop > 0.001) {",
+            "        float flashCenter = exp(-dot(p, p) * 3.8);",
+            "        c = clamp(c * (1.0 + 0.09 * uFlashPop * flashCenter), 0.0, 1.0);",
             "    }",
             "    float peak = dot(clamp(c, 0.0, 1.0), vec3(0.299, 0.587, 0.114));",
-            "    float hi = smoothstep(0.86, 1.0, peak);",
-            "    c += vec3(0.085, 0.022, 0.004) * (hi * hi) * uHalation;",
-            "    float leakY = mix(0.24, 0.84, fract(uLeakSeed));",
-            "    float leakX = uLeakSeed > 0.5 ? 1.06 : -0.06;",
+            "    float hi = smoothstep(0.84, 1.0, peak);",
+            "    c += vec3(0.090, 0.024, 0.005) * (hi * hi) * uHalation;",
+            "    float leakY = mix(0.22, 0.86, fract(uLeakSeed));",
+            "    float leakX = uLeakSeed > 0.5 ? 1.05 : -0.05;",
             "    float d = distance(uv, vec2(leakX, leakY));",
-            "    float leakMask = exp(-d * d * 5.2) * uLeak;",
-            "    c += uLeakColor * leakMask * 0.52;",
-            "    vec2 p = uv - 0.5;",
+            "    float leakMask = exp(-d * d * 5.0) * uLeak;",
+            "    c += uLeakColor * leakMask * 0.54;",
             "    float aspect = (uResolution.x * uFrameScale.x) / max(uResolution.y * uFrameScale.y, 1.0);",
             "    p.x *= mix(1.0, aspect, 0.45);",
-            "    c *= clamp(1.0 - uVignette * dot(p, p) * 1.35, 0.0, 1.0);",
+            "    float effVignette = uVignette + uFlashPop * 0.18;",
+            "    c *= clamp(1.0 - effVignette * dot(p, p) * 1.38, 0.0, 1.0);",
             "    vec2 framePx = uv * (uResolution * uFrameScale);",
             "    float shortEdge = min(uResolution.x * uFrameScale.x, uResolution.y * uFrameScale.y);",
             "    float grainScale = max(shortEdge / 1180.0, 1.0);",
             "    vec2 gx = floor(framePx / grainScale);",
-            "    float fine = filmHash(gx + vec2(uTime * 37.0, uTime * 17.0));",
-            "    float coarse = filmHash(floor(gx * 0.5) + vec2(uTime * 19.0, uTime * 43.0));",
-            "    float grain = (fine * 0.62 + coarse * 0.38) - 0.5;",
+            "    float fineL = filmHash(gx + vec2(uTime * 37.0, uTime * 17.0));",
+            "    float coarseL = filmHash(floor(gx * 0.5) + vec2(uTime * 19.0, uTime * 43.0));",
+            "    float monoGrain = (fineL * 0.62 + coarseL * 0.38) - 0.5;",
+            "    float dyeR = filmHash(gx + vec2(11.3, 29.7) + vec2(uTime * 23.0, 0.0)) - 0.5;",
+            "    float dyeB = filmHash(gx + vec2(47.1, 7.9) + vec2(0.0, uTime * 31.0)) - 0.5;",
+            "    vec3 dyeGrain = uGrayscale > 0.5",
+            "            ? vec3(monoGrain)",
+            "            : mix(vec3(monoGrain), vec3(dyeR, monoGrain, dyeB), 0.30);",
             "    float gLum = dot(clamp(c, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722));",
-            "    float midtone = 0.35 + 0.65 * (4.0 * gLum * (1.0 - gLum));",
-            "    c += vec3(grain) * (uGrain * midtone);",
+            "    float grainMask = (0.38 + 0.62 * (4.0 * gLum * (1.0 - gLum))) * (1.0 - smoothstep(0.80, 0.99, gLum));",
+            "    c += dyeGrain * (uGrain * grainMask);",
             "    return clamp(c, 0.0, 1.0);",
             "}"
     );
@@ -142,8 +201,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             MIST_BODY,
             FILM_BODY,
             "void main() {",
-            "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
-            "    src = applyMist(src, vTexCoord);",
+            "    vec3 src = sampleLensAndMist(vTexCoord, vScreenUv);",
             "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
@@ -180,8 +238,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             MIST_BODY,
             FILM_BODY,
             "void main() {",
-            "    vec3 src = texture2D(uTexture, vTexCoord).rgb;",
-            "    src = applyMist(src, vTexCoord);",
+            "    vec3 src = sampleLensAndMist(vTexCoord, vScreenUv);",
             "    gl_FragColor = vec4(filmColor(src, vScreenUv), 1.0);",
             "}"
     );
@@ -207,7 +264,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     private static final class Locs {
         int position, texCoord, texMatrix;
-        int texture, colorMatrix, colorOffset, saturation, contrast, brightness;
+        int texture, lutTex, lutStrength, wbGain, chromaAberration, cornerSoftness, flashPop, bypassFilm;
+        int colorMatrix, colorOffset, saturation, contrast, brightness;
         int fade, grain, vignette, leak, halation, grayscale, leakColor;
         int leakSeed, frameScale, time, resolution, mist, mistStep;
 
@@ -217,6 +275,13 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             l.texCoord = GLES20.glGetAttribLocation(program, "aTexCoord");
             l.texMatrix = uniform(program, "uTexMatrix");
             l.texture = uniform(program, "uTexture");
+            l.lutTex = uniform(program, "uLutTex");
+            l.lutStrength = uniform(program, "uLutStrength");
+            l.wbGain = uniform(program, "uWbGain");
+            l.chromaAberration = uniform(program, "uChromaAberration");
+            l.cornerSoftness = uniform(program, "uCornerSoftness");
+            l.flashPop = uniform(program, "uFlashPop");
+            l.bypassFilm = uniform(program, "uBypassFilm");
             l.colorMatrix = uniform(program, "uColorMatrix");
             l.colorOffset = uniform(program, "uColorOffset");
             l.saturation = uniform(program, "uSaturation");
@@ -252,6 +317,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     private SurfaceTexture surfaceTexture;
     private int oesTextureId;
+    private int lutTextureId;
+    private final String[] uploadedLutId = {null};
     private int previewProgram, photoProgram, meterProgram;
     private Locs previewLocs, photoLocs, meterLocs;
     private int meterFboId = 0, meterTexId = 0;
@@ -319,16 +386,15 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
     private volatile boolean grainBoost = false;
     private volatile boolean lightLeakEnabled = true;
     private volatile boolean blackMistEnabled = false;
+    private volatile float sceneWbShift = 0f;
+    private volatile boolean flashActive = false;
+    private volatile boolean bypassFilm = false;
     private volatile float leakSeed = 0.28f;
     private volatile float frameScaleX = 1f;
     private volatile float frameScaleY = 1f;
-    /** Last timestamp used for the live preview, so the print can freeze the same grain pattern. */
     private volatile float previewTimeSec = 0f;
-    /** False while the host is paused: renderPhoto must fail fast instead of waiting for a stopped GL loop. */
     private volatile boolean hostResumed = true;
-    /** Driver texture limit; prints are capped to it because applyPaper makes them larger still. */
     private int glMaxTexture = 2048;
-    /** Non-null when the GL context could not be initialised (shader/driver failure). */
     private volatile String initError = null;
 
     GLFilmRenderer(FilmCameraView view, FilmPreset initialPreset) {
@@ -347,8 +413,6 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glDisable(GLES20.GL_BLEND);
         GLES20.glClearColor(0.067f, 0.063f, 0.055f, 1f);
 
-        // An EGL context loss re-enters this method; drop the previous generation first
-        // so textures/programs/FBOs and the old SurfaceTexture are not leaked.
         releaseGlObjects();
 
         try {
@@ -359,6 +423,8 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             }
 
             oesTextureId = createOesTexture();
+            lutTextureId = createLutTexture();
+            uploadedLutId[0] = null;
             surfaceTexture = new SurfaceTexture(oesTextureId);
             surfaceTexture.setOnFrameAvailableListener(this);
 
@@ -376,7 +442,6 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             initMeterFbo();
             initError = null;
         } catch (Throwable t) {
-            // A shader compile/link failure used to surface as a silent black viewfinder.
             initError = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
             releaseGlObjects();
             view.post(() -> view.notifyRendererError(initError));
@@ -387,10 +452,6 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         view.post(() -> view.notifySurfaceReady(ready));
     }
 
-    /**
-     * Deletes every GL object owned by the renderer and releases the SurfaceTexture.
-     * Must run on the GL thread. Safe to call repeatedly.
-     */
     void releaseGlObjects() {
         if (surfaceTexture != null) {
             surfaceTexture.setOnFrameAvailableListener(null);
@@ -398,18 +459,20 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             surfaceTexture = null;
         }
         if (oesTextureId != 0) {
-            int[] tex = {oesTextureId};
-            GLES20.glDeleteTextures(1, tex, 0);
+            GLES20.glDeleteTextures(1, new int[]{oesTextureId}, 0);
             oesTextureId = 0;
         }
+        if (lutTextureId != 0) {
+            GLES20.glDeleteTextures(1, new int[]{lutTextureId}, 0);
+            lutTextureId = 0;
+        }
+        uploadedLutId[0] = null;
         if (meterFboId != 0) {
-            int[] fbo = {meterFboId};
-            GLES20.glDeleteFramebuffers(1, fbo, 0);
+            GLES20.glDeleteFramebuffers(1, new int[]{meterFboId}, 0);
             meterFboId = 0;
         }
         if (meterTexId != 0) {
-            int[] tex = {meterTexId};
-            GLES20.glDeleteTextures(1, tex, 0);
+            GLES20.glDeleteTextures(1, new int[]{meterTexId}, 0);
             meterTexId = 0;
         }
         int[] programs = {previewProgram, photoProgram, meterProgram};
@@ -493,20 +556,24 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         surfaceTexture.getTransformMatrix(stMatrix);
         buildTexMatrix();
 
-        // Draw primary preview immediately first, then run optional tiny 32x24 raw sample pass.
+        FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
+        ensureLutUploaded(lutTextureId, uploadedLutId, p);
+
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         GLES20.glViewport(0, 0, viewportW, viewportH);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTextureId);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
         GLES20.glUseProgram(previewProgram);
-        FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
         previewTimeSec = (System.nanoTime() % 1_000_000_000L) / 1_000_000_000f;
-        applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled, leakSeed,
-                frameScaleX, frameScaleY, viewportW, viewportH, previewTimeSec);
+        applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled,
+                sceneWbShift, flashActive, bypassFilm,
+                leakSeed, frameScaleX, frameScaleY, viewportW, viewportH, previewTimeSec);
         GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
-        drawQuad(previewLocs, cameraTexBuffer);
+        drawQuad(previewLocs, quadBuffer, cameraTexBuffer);
 
         sampleTelemetryIfDue();
     }
@@ -530,7 +597,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glUniform1i(meterLocs.texture, 0);
         GLES20.glUniform2f(meterLocs.frameScale, frameScaleX, frameScaleY);
         GLES20.glUniformMatrix4fv(meterLocs.texMatrix, 1, false, texMatrix, 0);
-        drawQuad(meterLocs, cameraTexBuffer);
+        drawQuad(meterLocs, quadBuffer, cameraTexBuffer);
 
         meterReadBuffer.position(0);
         GLES20.glPixelStorei(GLES20.GL_PACK_ALIGNMENT, 1);
@@ -614,6 +681,23 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         view.requestRender();
     }
 
+    void setSceneWbShift(float wbShift) {
+        sceneWbShift = Math.max(-1f, Math.min(1f, wbShift));
+        view.requestRender();
+    }
+
+    void setFlashActive(boolean active) {
+        flashActive = active;
+        view.requestRender();
+    }
+
+    void setBypassFilm(boolean bypass) {
+        if (bypassFilm != bypass) {
+            bypassFilm = bypass;
+            view.requestRender();
+        }
+    }
+
     void setLeakSeed(float seed) {
         leakSeed = seed;
         view.requestRender();
@@ -634,26 +718,136 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         view.requestRender();
     }
 
-    /**
-     * Runs on the GL thread (via postTask). Reuses the preview shader on the
-     * cropped capture or imported bitmap, renders to an FBO and reads pixels back.
-     */
     Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
-                       boolean leakEnabled, float seed) {
-        return renderPhoto(source, p, boostGrain, leakEnabled, false, seed);
-    }
-
-    Bitmap renderPhoto(Bitmap source, FilmPreset p, boolean boostGrain,
-                       boolean leakEnabled, boolean mistEnabled, float seed) {
+                       boolean leakEnabled, boolean mistEnabled,
+                       float wbShift, boolean usedFlash, float seed) {
         if (!hostResumed) {
             throw new IllegalStateException("GL preview paused");
         }
-        if (photoProgram == 0) {
+        if (photoProgram == 0 || lutTextureId == 0) {
             throw new IllegalStateException("GL renderer not ready");
         }
-        // applyPaper later adds a border on top, so keep the development target inside
-        // the driver's texture limit instead of producing an incomplete FBO.
-        int maxEdge = maxRenderEdge();
+        Bitmap out = renderBitmapOnActiveGl(
+                source, p, boostGrain, leakEnabled, mistEnabled, wbShift, usedFlash, seed,
+                photoProgram, photoLocs, lutTextureId, uploadedLutId,
+                quadBuffer, photoTexBuffer, identity, maxRenderEdge(), previewTimeSec);
+        GLES20.glViewport(0, 0, viewportW, viewportH);
+        return out;
+    }
+
+    /**
+     * Reusable standalone off-screen EGL 2.0 session for {@link DarkroomEditorDialog},
+     * batch photo development, and {@link GalleryActivity} negative re-washing without
+     * requiring an active camera {@link GLSurfaceView}.
+     */
+    static final class OffscreenSession implements AutoCloseable {
+        private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
+        private android.opengl.EGLContext context = EGL14.EGL_NO_CONTEXT;
+        private EGLSurface surface = EGL14.EGL_NO_SURFACE;
+        private int program = 0;
+        private Locs locs;
+        private int lutTex = 0;
+        private final String[] cachedLutId = {null};
+        private FloatBuffer quadBuf;
+        private FloatBuffer texBuf;
+        private final float[] idMat = new float[16];
+        private int maxEdge = 2560;
+
+        OffscreenSession() {
+            Matrix.setIdentityM(idMat, 0);
+            display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+            if (display == EGL14.EGL_NO_DISPLAY) {
+                throw new IllegalStateException("No EGL display");
+            }
+            int[] ver = new int[2];
+            if (!EGL14.eglInitialize(display, ver, 0, ver, 1)) {
+                throw new IllegalStateException("eglInitialize failed");
+            }
+            int[] cfgAttribs = {
+                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                    EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
+                    EGL14.EGL_RED_SIZE, 8,
+                    EGL14.EGL_GREEN_SIZE, 8,
+                    EGL14.EGL_BLUE_SIZE, 8,
+                    EGL14.EGL_ALPHA_SIZE, 8,
+                    EGL14.EGL_NONE
+            };
+            android.opengl.EGLConfig[] configs = new android.opengl.EGLConfig[1];
+            int[] numCfg = new int[1];
+            if (!EGL14.eglChooseConfig(display, cfgAttribs, 0, configs, 0, 1, numCfg, 0)
+                    || numCfg[0] <= 0) {
+                throw new IllegalStateException("eglChooseConfig failed");
+            }
+            int[] ctxAttribs = {EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE};
+            context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, ctxAttribs, 0);
+            int[] surfAttribs = {EGL14.EGL_WIDTH, 4, EGL14.EGL_HEIGHT, 4, EGL14.EGL_NONE};
+            surface = EGL14.eglCreatePbufferSurface(display, configs[0], surfAttribs, 0);
+            if (!EGL14.eglMakeCurrent(display, surface, surface, context)) {
+                throw new IllegalStateException("eglMakeCurrent failed");
+            }
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST);
+            GLES20.glDisable(GLES20.GL_BLEND);
+            int[] maxTex = new int[1];
+            GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maxTex, 0);
+            if (maxTex[0] >= 1024) {
+                maxEdge = Math.min(maxTex[0], 4096);
+            }
+            program = createProgram(VERTEX_SHADER, PHOTO_FRAGMENT);
+            locs = Locs.of(program);
+            lutTex = createLutTexture();
+            quadBuf = floatBuffer(QUAD);
+            texBuf = floatBuffer(TEX_PHOTO);
+        }
+
+        int getMaxRenderEdge() {
+            return maxEdge;
+        }
+
+        Bitmap render(Bitmap source, FilmPreset preset, boolean boostGrain,
+                      boolean leakEnabled, boolean mistEnabled,
+                      float wbShift, boolean usedFlash, float seed) {
+            if (!EGL14.eglMakeCurrent(display, surface, surface, context)) {
+                throw new IllegalStateException("Offscreen EGL context lost");
+            }
+            return renderBitmapOnActiveGl(
+                    source, preset, boostGrain, leakEnabled, mistEnabled,
+                    wbShift, usedFlash, seed,
+                    program, locs, lutTex, cachedLutId,
+                    quadBuf, texBuf, idMat, maxEdge, (seed * 0.73f) % 1f);
+        }
+
+        @Override
+        public void close() {
+            if (display != EGL14.EGL_NO_DISPLAY) {
+                try {
+                    if (context != EGL14.EGL_NO_CONTEXT && surface != EGL14.EGL_NO_SURFACE) {
+                        EGL14.eglMakeCurrent(display, surface, surface, context);
+                        if (lutTex != 0) GLES20.glDeleteTextures(1, new int[]{lutTex}, 0);
+                        if (program != 0) GLES20.glDeleteProgram(program);
+                    }
+                } catch (Throwable ignored) {
+                }
+                EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
+                if (surface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, surface);
+                if (context != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display, context);
+                EGL14.eglTerminate(display);
+            }
+            display = EGL14.EGL_NO_DISPLAY;
+            context = EGL14.EGL_NO_CONTEXT;
+            surface = EGL14.EGL_NO_SURFACE;
+            lutTex = 0;
+            program = 0;
+        }
+    }
+
+    private static Bitmap renderBitmapOnActiveGl(
+            Bitmap source, FilmPreset p, boolean boostGrain, boolean leakEnabled,
+            boolean mistEnabled, float wbShift, boolean usedFlash, float seed,
+            int program, Locs locs, int lutTex, String[] lutCacheHolder,
+            FloatBuffer quadBuf, FloatBuffer texBuf, float[] idMat,
+            int maxEdge, float timeSec) {
+        ensureLutUploaded(lutTex, lutCacheHolder, p);
+
         Bitmap renderSrc = source;
         int longest = Math.max(source.getWidth(), source.getHeight());
         if (longest > maxEdge) {
@@ -673,9 +867,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glGenFramebuffers(1, fbo, 0);
 
         try {
-            // Upload source bitmap to a read-only texture and render into a
-            // separate destination texture so the GPU never samples and writes
-            // the same storage in one draw call (FBO feedback loop).
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
@@ -700,32 +892,31 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             }
 
             GLES20.glViewport(0, 0, w, h);
-            GLES20.glUseProgram(photoProgram);
+            GLES20.glUseProgram(program);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTex);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex);
-            applyUniformsFor(photoLocs, p, boostGrain, leakEnabled, mistEnabled, seed, 1f, 1f, w, h,
-                    previewTimeSec);
-            GLES20.glUniformMatrix4fv(photoLocs.texMatrix, 1, false, identity, 0);
-            drawQuad(photoLocs, photoTexBuffer);
+            applyUniformsFor(locs, p, boostGrain, leakEnabled, mistEnabled,
+                    wbShift, usedFlash, false,
+                    seed, 1f, 1f, w, h, timeSec);
+            GLES20.glUniformMatrix4fv(locs.texMatrix, 1, false, idMat, 0);
+            drawQuad(locs, quadBuf, texBuf);
             GLES20.glFinish();
 
             return readFlippedFboBitmap(w, h);
         } finally {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             GLES20.glDeleteFramebuffers(1, fbo, 0);
             GLES20.glDeleteTextures(2, textures, 0);
-            GLES20.glViewport(0, 0, viewportW, viewportH);
             if (renderSrc != source && !renderSrc.isRecycled()) {
                 renderSrc.recycle();
             }
         }
     }
 
-    /**
-     * Captures the active cropped viewfinder frame (with active film preset) into a small
-     * Bitmap on the GL thread for on-demand AI composition inspection.
-     */
     Bitmap capturePreviewBitmap(int maxEdge) {
         if (!hostResumed || surfaceTexture == null || previewProgram == 0
                 || viewportW <= 1 || viewportH <= 1) {
@@ -742,6 +933,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         GLES20.glGenFramebuffers(1, fbo, 0);
         Bitmap full = null;
         try {
+            FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
+            ensureLutUploaded(lutTextureId, uploadedLutId, p);
+
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0]);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
@@ -758,14 +952,16 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             }
 
             GLES20.glViewport(0, 0, w, h);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTextureId);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId);
             GLES20.glUseProgram(previewProgram);
-            FilmPreset p = preset != null ? preset : FilmPresets.all()[0];
-            applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled, leakSeed,
-                    frameScaleX, frameScaleY, w, h, previewTimeSec);
+            applyUniformsFor(previewLocs, p, grainBoost, lightLeakEnabled, blackMistEnabled,
+                    sceneWbShift, flashActive, false,
+                    leakSeed, frameScaleX, frameScaleY, w, h, previewTimeSec);
             GLES20.glUniformMatrix4fv(previewLocs.texMatrix, 1, false, texMatrix, 0);
-            drawQuad(previewLocs, cameraTexBuffer);
+            drawQuad(previewLocs, quadBuffer, cameraTexBuffer);
             GLES20.glFinish();
 
             full = readFlippedFboBitmap(w, h);
@@ -783,6 +979,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
             if (full != null && !full.isRecycled()) {
                 full.recycle();
             }
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             GLES20.glDeleteFramebuffers(1, fbo, 0);
@@ -818,11 +1015,36 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     // ---------------------------------------------------------------- internals
 
-    private static void applyUniformsFor(Locs l, FilmPreset p, boolean boostGrain,
-                                         boolean leakEnabled, boolean mistEnabled, float seed,
-                                         float frameScaleX, float frameScaleY,
-                                         int w, int h, float timeSec) {
+    private static void ensureLutUploaded(int lutTexId, String[] cachedIdHolder, FilmPreset p) {
+        if (lutTexId == 0 || p == null) return;
+        FilmPreset canonical = FilmPresets.all()[FilmPresets.indexOfId(p.id)];
+        if (canonical.id.equals(cachedIdHolder[0])) return;
+        byte[] rgba = FilmLutMath.generateLut256x16(canonical);
+        ByteBuffer buf = ByteBuffer.allocateDirect(rgba.length).order(ByteOrder.nativeOrder());
+        buf.put(rgba).position(0);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTexId);
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
+                FilmLutMath.LUT_WIDTH, FilmLutMath.LUT_HEIGHT, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        cachedIdHolder[0] = canonical.id;
+    }
+
+    private static void applyUniformsFor(
+            Locs l, FilmPreset p, boolean boostGrain, boolean leakEnabled, boolean mistEnabled,
+            float wbShift, boolean usedFlash, boolean bypass,
+            float seed, float frameScaleX, float frameScaleY, int w, int h, float timeSec) {
+        float[] wbGain = FilmLutMath.computeSceneWbMultipliers(wbShift);
         GLES20.glUniform1i(l.texture, 0);
+        GLES20.glUniform1i(l.lutTex, 1);
+        GLES20.glUniform1f(l.lutStrength, p.lutStrength);
+        GLES20.glUniform3f(l.wbGain, wbGain[0], wbGain[1], wbGain[2]);
+        GLES20.glUniform1f(l.chromaAberration, p.chromaAberration);
+        GLES20.glUniform1f(l.cornerSoftness, p.cornerSoftness);
+        GLES20.glUniform1f(l.flashPop, usedFlash ? p.flashPop : 0f);
+        GLES20.glUniform1f(l.bypassFilm, bypass ? 1f : 0f);
         GLES20.glUniformMatrix3fv(l.colorMatrix, 1, false, p.colorMatrix, 0);
         GLES20.glUniform3f(l.colorOffset, p.colorOffset[0], p.colorOffset[1], p.colorOffset[2]);
         GLES20.glUniform1f(l.saturation, p.saturation);
@@ -870,9 +1092,9 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         }
     }
 
-    private void drawQuad(Locs l, FloatBuffer texCoords) {
+    private static void drawQuad(Locs l, FloatBuffer quadBuf, FloatBuffer texCoords) {
         GLES20.glEnableVertexAttribArray(l.position);
-        GLES20.glVertexAttribPointer(l.position, 2, GLES20.GL_FLOAT, false, 8, quadBuffer);
+        GLES20.glVertexAttribPointer(l.position, 2, GLES20.GL_FLOAT, false, 8, quadBuf);
         GLES20.glEnableVertexAttribArray(l.texCoord);
         GLES20.glVertexAttribPointer(l.texCoord, 2, GLES20.GL_FLOAT, false, 8, texCoords);
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
@@ -886,6 +1108,20 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
         fb.put(values);
         fb.position(0);
         return fb;
+    }
+
+    private static int createLutTexture() {
+        int[] ids = new int[1];
+        GLES20.glGenTextures(1, ids, 0);
+        int id = ids[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+        checkGlError("createLutTexture");
+        return id;
     }
 
     private static int createOesTexture() {

@@ -29,6 +29,7 @@
     <string name="ev_pill_zero">EV 0</string>
     <string name="ev_label">EV</string>
     <string name="ev_zero">0.0</string>
+    <string name="wb_label">色温</string>
     <string name="close">关闭</string>
 
     <string name="hint_mode_single">单张模式</string>
@@ -58,6 +59,7 @@
 
     <string name="paper_ivory">暖白</string>
     <string name="paper_black">黑胶</string>
+    <string name="paper_exif">铭牌</string>
     <string name="paper_sprocket">齿孔</string>
     <string name="paper_none">无边</string>
 
@@ -95,6 +97,7 @@
     <string name="hint_grid_crosshair">中心十字</string>
     <string name="hint_grid_off">网格关</string>
     <string name="hint_golden_rotated">螺旋已旋转</string>
+    <string name="hint_comparing_original">原片对比</string>
 
     <string name="rotate_viewfinder">旋转</string>
     <string name="rotation_auto">自动</string>
@@ -124,12 +127,20 @@
     <string name="flash_off">OFF</string>
 
     <string name="editor_title">冲印</string>
+    <string name="editor_redevelop_title">底片重洗</string>
+    <string name="editor_batch_title">批量冲印 · %1$d 张</string>
     <string name="editor_note_hint">注记…</string>
     <string name="editor_save">冲印</string>
+    <string name="editor_batch_save">冲印 (%1$d)</string>
     <string name="editor_developing">冲洗中…</string>
+    <string name="editor_batch_progress">冲印中 %1$d / %2$d…</string>
+    <string name="editor_batch_done">已冲印 %1$d 张</string>
+    <string name="editor_batch_limit_toast">单次最多批量冲印 %1$d 张</string>
+    <string name="editor_hold_compare_hint">按住预览画面对比原图</string>
     <string name="editor_load_failed">无法读取</string>
 
     <string name="gallery_title">底片</string>
+    <string name="gallery_redevelop">重洗</string>
     <string name="gallery_empty">暂无底片</string>
     <string name="gallery_frames">%1$d 格</string>
     <string name="gallery_contact_sheet">联系表</string>

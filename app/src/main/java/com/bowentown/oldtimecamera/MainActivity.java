@@ -92,7 +92,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Main viewfinder activity: CameraX preview & capture, unified OpenGL ES film
  * emulation, tactile shutter, darkroom controls, and gallery import/archive.
  */
-public class MainActivity extends ComponentActivity {
+public final class MainActivity extends ComponentActivity {
 
     private static final int REQUEST_PERMISSIONS = 1001;
     private static final int MAX_PHOTO_EDGE = 2560;
@@ -112,7 +112,7 @@ public class MainActivity extends ComponentActivity {
     private FilmCameraView previewView;
     private ViewfinderOverlayView viewfinderOverlay;
     private TextView rollCounter, dateStampPreview, countdownText;
-    private TextView zoomPill, aspectPill, evPill, evValueText, timerLabel;
+    private TextView zoomPill, aspectPill, evPill, evValueText, wbValueText, timerLabel;
     private TextView assistHintPill;
     private TextView recipePanelTitle, recipeIntensityVal, recipeGrainVal, recipeWarmthVal;
     private LinearLayout recipePanel;
@@ -121,7 +121,8 @@ public class MainActivity extends ComponentActivity {
     private ImageView timerIcon, thumbnail, thumbPlaceholder;
     private HorizontalScrollView filmStripScroll;
     private LinearLayout chipContainer, evPanel;
-    private SeekBar evSeekBar, recipeIntensitySeek, recipeGrainSeek, recipeWarmthSeek;
+    private View evRow;
+    private SeekBar evSeekBar, wbSeekBar, recipeIntensitySeek, recipeGrainSeek, recipeWarmthSeek;
     private FrameLayout shutterButton, thumbnailFrame;
     private ShutterProgressView shutterProgress;
     private View shutterCore, flashOverlay, permissionGate;
@@ -147,6 +148,8 @@ public class MainActivity extends ComponentActivity {
     private boolean grainBoost = false;
     private boolean lightLeakEnabled = true;
     private boolean blackMistEnabled = false;
+    private float sceneWbShift = 0f;
+    private volatile boolean comparingOriginal = false;
     private CompositionMath.GridMode gridMode = CompositionMath.GridMode.OFF;
     private int goldenRotation = 0;
     private boolean levelEnabled = false;
@@ -316,10 +319,14 @@ public class MainActivity extends ComponentActivity {
     };
 
     private final ActivityResultLauncher<String> pickPhotoLauncher =
-            registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
-                if (uri != null) {
-                    DarkroomEditorDialog.show(this, previewView, prefs, uri, currentPreset,
+            registerForActivityResult(new ActivityResultContracts.GetMultipleContents(), uris -> {
+                if (uris == null || uris.isEmpty()) return;
+                if (uris.size() == 1) {
+                    DarkroomEditorDialog.showSingle(this, prefs, uris.get(0), currentPreset,
                             (savedUri, thumb) -> onExternalPrintSaved(savedUri, thumb));
+                } else {
+                    DarkroomEditorDialog.showBatch(this, prefs, uris, currentPreset,
+                            this::onBatchPrintsSaved);
                 }
             });
 
@@ -344,6 +351,9 @@ public class MainActivity extends ComponentActivity {
         cameraExecutor.execute(() -> shutterSound.load(MediaActionSound.SHUTTER_CLICK));
 
         applyPresetSelection(selectedChipIndex, false);
+        previewView.setSceneWbShift(sceneWbShift);
+        previewView.setFlashActive(flashMode == ImageCapture.FLASH_MODE_ON);
+        syncWbUi();
         applyAspectRatio(false);
         updateGridUi();
         updateLevelUi();
@@ -357,7 +367,8 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void loadPrefs() {
-        currentPreset = FilmPresets.indexOfId(prefs.getPresetId("warm400"));
+        currentPreset = FilmPresets.indexOfId(
+                prefs.getPresetId(FilmPresets.all()[FilmPresets.DEFAULT_INDEX].id));
         savedRecipes = prefs.getSavedRecipes();
         activeCustomRecipeId = prefs.getActiveCustomRecipeId();
         filmRecipe = prefs.getFilmRecipe();
@@ -369,6 +380,7 @@ public class MainActivity extends ComponentActivity {
         grainBoost = prefs.isGrainBoost();
         lightLeakEnabled = prefs.isLightLeakEnabled();
         blackMistEnabled = prefs.isBlackMistEnabled();
+        sceneWbShift = prefs.getSceneWbShift();
         gridMode = prefs.getGridMode();
         goldenRotation = prefs.getGoldenRotation();
         levelEnabled = prefs.isLevelEnabled();
@@ -416,8 +428,11 @@ public class MainActivity extends ComponentActivity {
         aspectPill = findViewById(R.id.aspectPill);
         evPill = findViewById(R.id.evPill);
         evPanel = findViewById(R.id.evPanel);
+        evRow = findViewById(R.id.evRow);
         evSeekBar = findViewById(R.id.evSeekBar);
         evValueText = findViewById(R.id.evValueText);
+        wbSeekBar = findViewById(R.id.wbSeekBar);
+        wbValueText = findViewById(R.id.wbValueText);
         gridPill = findViewById(R.id.gridPill);
         modePill = findViewById(R.id.modePill);
         recipePanel = findViewById(R.id.recipePanel);
@@ -552,6 +567,35 @@ public class MainActivity extends ComponentActivity {
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
+        evValueText.setOnClickListener(v -> {
+            if (camera != null && evMax > evMin) {
+                camera.getCameraControl().setExposureCompensationIndex(0);
+                evSeekBar.setProgress(Math.max(0, -evMin));
+                updateEvUi(0);
+            }
+        });
+
+        wbSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                sceneWbShift = (progress - 10) / 10f;
+                prefs.setSceneWbShift(sceneWbShift);
+                previewView.setSceneWbShift(sceneWbShift);
+                syncWbUi();
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        wbValueText.setOnClickListener(v -> {
+            sceneWbShift = 0f;
+            prefs.setSceneWbShift(0f);
+            previewView.setSceneWbShift(0f);
+            syncWbUi();
+        });
+
         viewfinderOverlay.setOnFrameBoundsListener((rect, vw, vh) -> {
             latestFrameRect.set(rect);
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dateStampPreview.getLayoutParams();
@@ -595,6 +639,15 @@ public class MainActivity extends ComponentActivity {
                 int next = (selectedChipIndex + direction + total) % total;
                 shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 applyPresetSelection(next, true);
+            }
+
+            @Override
+            public void onCompareOriginalChanged(boolean comparing) {
+                comparingOriginal = comparing;
+                if (comparing) {
+                    shutterButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                }
+                refreshAssistHint();
             }
         });
     }
@@ -1198,7 +1251,9 @@ public class MainActivity extends ComponentActivity {
         String nextText = null;
         boolean clickable = false;
 
-        if (steadyWaiting) {
+        if (comparingOriginal) {
+            nextText = getString(R.string.hint_comparing_original);
+        } else if (steadyWaiting) {
             nextText = getString(R.string.hint_steady_wait);
         } else if (transientHintText != null && now < transientHintUntilMs) {
             nextText = transientHintText;
@@ -1247,8 +1302,9 @@ public class MainActivity extends ComponentActivity {
         activeHintText = nextText;
         activeHintClickable = clickable;
         assistHintPill.setClickable(clickable);
-        boolean amberTint = steadyWaiting || aiDirectorThinking || activeDirectorPlan != null
-                || clickable || (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null);
+        boolean amberTint = comparingOriginal || steadyWaiting || aiDirectorThinking
+                || activeDirectorPlan != null || clickable
+                || (shootMode == CameraPrefs.ShootMode.HALF_FRAME && halfFirstFrame != null);
         if (!same) {
             assistHintPill.setText(nextText);
             assistHintPill.setTextColor(getColor(amberTint ? R.color.amber_led : R.color.paper));
@@ -1546,6 +1602,7 @@ public class MainActivity extends ComponentActivity {
             flashButton.setImageResource(R.drawable.ic_flash_auto);
         }
         if (imageCapture != null) imageCapture.setFlashMode(flashMode);
+        previewView.setFlashActive(flashMode == ImageCapture.FLASH_MODE_ON);
     }
 
     private void switchLens() {
@@ -1781,6 +1838,7 @@ public class MainActivity extends ComponentActivity {
         updateZoomUi();
 
         ExposureState es = camera.getCameraInfo().getExposureState();
+        evPill.setVisibility(View.VISIBLE);
         if (es.isExposureCompensationSupported()) {
             Range<Integer> range = es.getExposureCompensationRange();
             evMin = range.getLower();
@@ -1789,27 +1847,50 @@ public class MainActivity extends ComponentActivity {
             evSeekBar.setMax(Math.max(1, evMax - evMin));
             int currentIdx = es.getExposureCompensationIndex();
             evSeekBar.setProgress(Math.max(0, currentIdx - evMin));
+            evRow.setVisibility(View.VISIBLE);
             updateEvUi(currentIdx);
-            evPill.setVisibility(View.VISIBLE);
         } else {
             evMin = 0;
             evMax = 0;
-            evPill.setVisibility(View.GONE);
-            evPanel.setVisibility(View.GONE);
+            evRow.setVisibility(View.GONE);
+            updateEvUi(0);
         }
     }
 
+    private void syncWbUi() {
+        if (wbSeekBar != null) {
+            wbSeekBar.setProgress(Math.max(0, Math.min(20, Math.round((sceneWbShift + 1f) * 10f))));
+        }
+        if (wbValueText != null) {
+            wbValueText.setText(FilmLutMath.wbKelvinLabel(sceneWbShift));
+            wbValueText.setTextColor(getColor(
+                    Math.abs(sceneWbShift) > 0.04f ? R.color.amber_led : R.color.paper_soft));
+        }
+        int currentIdx = (camera != null && evMax > evMin)
+                ? camera.getCameraInfo().getExposureState().getExposureCompensationIndex()
+                : 0;
+        updateEvUi(currentIdx);
+    }
+
     private void updateEvUi(int index) {
-        float ev = index * evStep;
-        if (Math.abs(ev) < 0.05f) {
-            evPill.setText("EV 0");
-            evPill.setTextColor(getResources().getColor(R.color.paper, getTheme()));
-            evValueText.setText("0.0");
-        } else {
+        float ev = (evMax > evMin) ? (index * evStep) : 0f;
+        boolean hasEv = Math.abs(ev) >= 0.05f;
+        boolean hasWb = Math.abs(sceneWbShift) > 0.04f;
+        if (evValueText != null) {
+            evValueText.setText(hasEv ? String.format(Locale.US, "%+.1f", ev) : "0.0");
+            evValueText.setTextColor(getColor(hasEv ? R.color.amber_led : R.color.paper_soft));
+        }
+        if (evPill == null) return;
+        if (hasEv) {
             String formatted = String.format(Locale.US, "%+.1f", ev);
             evPill.setText("EV " + formatted);
-            evPill.setTextColor(getResources().getColor(R.color.amber_led, getTheme()));
-            evValueText.setText(formatted);
+            evPill.setTextColor(getColor(R.color.amber_led));
+        } else if (hasWb) {
+            evPill.setText(FilmLutMath.wbKelvinLabel(sceneWbShift));
+            evPill.setTextColor(getColor(R.color.amber_led));
+        } else {
+            evPill.setText("EV 0");
+            evPill.setTextColor(getColor(R.color.paper));
         }
     }
 
@@ -2301,6 +2382,8 @@ public class MainActivity extends ComponentActivity {
         final boolean boostGrain = grainBoost;
         final boolean useLeak = lightLeakEnabled;
         final boolean useMist = blackMistEnabled;
+        final float shotWbShift = sceneWbShift;
+        final boolean shotFlashFired = usedScreenFlash || flashMode == ImageCapture.FLASH_MODE_ON;
         final float shotLeakSeed = leakSeed;
         final boolean shotFacingFront = facingFront;
         final boolean mirrorSelfie = CameraTransformMath.shouldMirrorCapture(
@@ -2370,7 +2453,8 @@ public class MainActivity extends ComponentActivity {
                     // Branch 2: Half-Frame 72 exposure 1/2 (render look now, keep reference inset)
                     if (shotMode == CameraPrefs.ShootMode.HALF_FRAME && firstHalfSnapshot == null) {
                         Bitmap filteredFirst = previewView.renderPhoto(
-                                cropped, effectivePreset, boostGrain, useLeak, useMist, shotLeakSeed);
+                                cropped, effectivePreset, boostGrain, useLeak, useMist,
+                                shotWbShift, shotFlashFired, shotLeakSeed);
                         if (filteredFirst != cropped) cropped.recycle();
 
                         int tw = Math.min(280, filteredFirst.getWidth());
@@ -2404,57 +2488,79 @@ public class MainActivity extends ComponentActivity {
 
                     // Branch 3: Completed exposure (SINGLE, DOUBLE_EXP 2/2, or HALF_FRAME 2/2)
                     Bitmap filtered;
-                    if (shotMode == CameraPrefs.ShootMode.HALF_FRAME && firstHalfSnapshot != null) {
-                        Bitmap filteredSecond = previewView.renderPhoto(
-                                cropped, effectivePreset, boostGrain, useLeak, useMist, shotLeakSeed);
-                        if (filteredSecond != cropped) cropped.recycle();
-                        boolean sideBySide = PhotoSaver.shouldPairHalfFrameSideBySide(firstHalfWasLandscape);
-                        filtered = PhotoSaver.composeHalfFrameDiptych(
-                                MainActivity.this, firstHalfSnapshot, filteredSecond, sideBySide, nextFrame);
-                        if (filteredSecond != filtered && !filteredSecond.isRecycled()) {
-                            filteredSecond.recycle();
+                    Bitmap negativeMaster = null;
+                    try {
+                        if (shotMode == CameraPrefs.ShootMode.HALF_FRAME && firstHalfSnapshot != null) {
+                            Bitmap filteredSecond = previewView.renderPhoto(
+                                    cropped, effectivePreset, boostGrain, useLeak, useMist,
+                                    shotWbShift, shotFlashFired, shotLeakSeed);
+                            if (filteredSecond != cropped) cropped.recycle();
+                            boolean sideBySide = PhotoSaver.shouldPairHalfFrameSideBySide(firstHalfWasLandscape);
+                            filtered = PhotoSaver.composeHalfFrameDiptych(
+                                    MainActivity.this, firstHalfSnapshot, filteredSecond, sideBySide, nextFrame);
+                            if (filteredSecond != filtered && !filteredSecond.isRecycled()) {
+                                filteredSecond.recycle();
+                            }
+                        } else {
+                            Bitmap developedInput = cropped;
+                            if (shotMode == CameraPrefs.ShootMode.DOUBLE_EXP && firstDoubleSnapshot != null) {
+                                Bitmap blended = PhotoSaver.blendDoubleExposure(firstDoubleSnapshot, cropped);
+                                if (blended != cropped) cropped.recycle();
+                                developedInput = blended;
+                            }
+                            negativeMaster = developedInput;
+                            filtered = previewView.renderPhoto(
+                                    developedInput, effectivePreset, boostGrain, useLeak, useMist,
+                                    shotWbShift, shotFlashFired, shotLeakSeed);
+                            if (filtered == negativeMaster) {
+                                // Ensure recycling filtered never recycles negativeMaster prematurely.
+                                negativeMaster = filtered.copy(Bitmap.Config.ARGB_8888, false);
+                            }
                         }
-                    } else {
-                        Bitmap developedInput = cropped;
-                        if (shotMode == CameraPrefs.ShootMode.DOUBLE_EXP && firstDoubleSnapshot != null) {
-                            Bitmap blended = PhotoSaver.blendDoubleExposure(firstDoubleSnapshot, cropped);
-                            if (blended != cropped) cropped.recycle();
-                            developedInput = blended;
+
+                        String exifTelemetry = (shotPaper == CameraPrefs.PaperStyle.SPROCKET_35MM
+                                || shotPaper == CameraPrefs.PaperStyle.EXIF_FRAME)
+                                ? PhotoSaver.extractShortExifTelemetry(jpeg) : null;
+                        PhotoSaver.ExifSpec exifSpec = shotPaper == CameraPrefs.PaperStyle.EXIF_FRAME
+                                ? PhotoSaver.extractExifSpec(jpeg) : null;
+                        Bitmap print = PhotoSaver.applyPaper(
+                                MainActivity.this, filtered, effectivePreset, shotPaper, shotDate,
+                                shotAspect, nextFrame, null, exifTelemetry, exifSpec);
+                        if (print != filtered) filtered.recycle();
+
+                        Uri savedUri = PhotoSaver.save(MainActivity.this, print, jpeg,
+                                PhotoSaver.buildRecipeComment(basePreset, boostGrain, useLeak,
+                                        shotRoll, nextFrame, rotation, shotRecipe, useMist, shotMode));
+                        int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
+                        Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
+                        print.recycle();
+
+                        if (negativeMaster != null && !negativeMaster.isRecycled()) {
+                            String disp = PhotoSaver.resolveDisplayName(MainActivity.this, savedUri);
+                            NegativeVault.saveNegative(MainActivity.this, savedUri, disp,
+                                    negativeMaster, jpeg, shotAspect);
                         }
-                        filtered = previewView.renderPhoto(
-                                developedInput, effectivePreset, boostGrain, useLeak, useMist, shotLeakSeed);
-                        if (filtered != developedInput) developedInput.recycle();
+
+                        final boolean clearDouble = (shotMode == CameraPrefs.ShootMode.DOUBLE_EXP && firstDoubleSnapshot != null);
+                        final boolean clearHalf = (shotMode == CameraPrefs.ShootMode.HALF_FRAME && firstHalfSnapshot != null);
+                        runOnUiThread(() -> {
+                            if (usedScreenFlash) endScreenFlash();
+                            if (clearDouble) {
+                                clearPendingMultiFrame();
+                                shootMode = CameraPrefs.ShootMode.SINGLE;
+                                prefs.setShootMode(shootMode);
+                                updateModeUi();
+                            } else if (clearHalf) {
+                                clearPendingMultiFrame();
+                                updateModeUi();
+                            }
+                            onPhotoSaved(savedUri, thumb);
+                        });
+                    } finally {
+                        if (negativeMaster != null && !negativeMaster.isRecycled()) {
+                            negativeMaster.recycle();
+                        }
                     }
-
-                    String exifTelemetry = shotPaper == CameraPrefs.PaperStyle.SPROCKET_35MM
-                            ? PhotoSaver.extractShortExifTelemetry(jpeg) : null;
-                    Bitmap print = PhotoSaver.applyPaper(
-                            MainActivity.this, filtered, effectivePreset, shotPaper, shotDate,
-                            shotAspect, nextFrame, null, exifTelemetry);
-                    if (print != filtered) filtered.recycle();
-
-                    Uri savedUri = PhotoSaver.save(MainActivity.this, print, jpeg,
-                            PhotoSaver.buildRecipeComment(basePreset, boostGrain, useLeak,
-                                    shotRoll, nextFrame, rotation, shotRecipe, useMist, shotMode));
-                    int thumbSize = FilmUiHelper.dp(MainActivity.this, 96);
-                    Bitmap thumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
-                    print.recycle();
-
-                    final boolean clearDouble = (shotMode == CameraPrefs.ShootMode.DOUBLE_EXP && firstDoubleSnapshot != null);
-                    final boolean clearHalf = (shotMode == CameraPrefs.ShootMode.HALF_FRAME && firstHalfSnapshot != null);
-                    runOnUiThread(() -> {
-                        if (usedScreenFlash) endScreenFlash();
-                        if (clearDouble) {
-                            clearPendingMultiFrame();
-                            shootMode = CameraPrefs.ShootMode.SINGLE;
-                            prefs.setShootMode(shootMode);
-                            updateModeUi();
-                        } else if (clearHalf) {
-                            clearPendingMultiFrame();
-                            updateModeUi();
-                        }
-                        onPhotoSaved(savedUri, thumb);
-                    });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
                         if (usedScreenFlash) endScreenFlash();
@@ -2505,6 +2611,29 @@ public class MainActivity extends ComponentActivity {
 
     private void onExternalPrintSaved(Uri savedUri, Bitmap thumb) {
         advanceRollAndThumbnail(savedUri, thumb);
+    }
+
+    private void onBatchPrintsSaved(int savedCount, Uri lastUri, Bitmap lastThumb) {
+        if (savedCount <= 0) return;
+        prefs.setLastPhotoUri(lastUri);
+        setThumbnailBitmap(lastThumb);
+        int rollCap = CameraPrefs.framesForMode(shootMode);
+        int totalExp = exposures + savedCount;
+        if (totalExp >= rollCap) {
+            int rollsDone = totalExp / rollCap;
+            int prevRoll = rollNumber;
+            rollNumber += rollsDone;
+            exposures = totalExp % rollCap;
+            prefs.setRollNumber(rollNumber);
+            Toast.makeText(this,
+                    getString(R.string.new_roll_loaded, prevRoll, rollNumber),
+                    Toast.LENGTH_LONG).show();
+        } else {
+            exposures = totalExp;
+        }
+        prefs.setExposures(exposures);
+        updateRollCounter();
+        capturing = false;
     }
 
     private void advanceRollAndThumbnail(Uri savedUri, Bitmap thumb) {
@@ -2638,6 +2767,7 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onPause() {
         isActivityResumed = false;
+        comparingOriginal = false;
         cancelCountdown();
         cancelSteadyWait(true);
         if (pendingScreenFlashCapture != null) {

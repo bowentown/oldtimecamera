@@ -69,6 +69,7 @@ public final class GalleryActivity extends ComponentActivity {
     private View lightboxOverlay;
     private ImageView lightboxImage;
     private TextView lightboxTitle, lightboxMeta;
+    private View lightboxRedevelop, lightboxRedevelopDivider;
     private View lightboxAiCard, lightboxAiRows;
     private TextView lightboxAiStatus, lightboxAiGood, lightboxAiIssue, lightboxAiNext;
     private boolean aiBusy = false;
@@ -79,6 +80,7 @@ public final class GalleryActivity extends ComponentActivity {
     private int lightboxIndex = -1;
     private Uri pendingDeleteUri;
     private Bitmap lightboxBitmap;
+    private NegativeVault.Entry currentNegativeEntry;
 
     private final ActivityResultLauncher<IntentSenderRequest> deleteSenderLauncher =
             registerForActivityResult(new ActivityResultContracts.StartIntentSenderForResult(), result -> {
@@ -121,6 +123,8 @@ public final class GalleryActivity extends ComponentActivity {
         lightboxImage = findViewById(R.id.lightboxImage);
         lightboxTitle = findViewById(R.id.lightboxTitle);
         lightboxMeta = findViewById(R.id.lightboxMeta);
+        lightboxRedevelop = findViewById(R.id.lightboxRedevelop);
+        lightboxRedevelopDivider = findViewById(R.id.lightboxRedevelopDivider);
         lightboxAiCard = findViewById(R.id.lightboxAiCard);
         lightboxAiRows = findViewById(R.id.lightboxAiRows);
         lightboxAiStatus = findViewById(R.id.lightboxAiStatus);
@@ -137,6 +141,7 @@ public final class GalleryActivity extends ComponentActivity {
 
         findViewById(R.id.lightboxClose).setOnClickListener(v -> closeLightbox());
         findViewById(R.id.lightboxShare).setOnClickListener(v -> shareCurrent());
+        lightboxRedevelop.setOnClickListener(v -> onRedevelopTapped());
         findViewById(R.id.lightboxDelete).setOnClickListener(v -> confirmDeleteCurrent());
         findViewById(R.id.lightboxAiCritique).setOnClickListener(v -> onAiCritiqueTapped());
         findViewById(R.id.lightboxAiRetry).setOnClickListener(v -> requestAiCritique(true));
@@ -252,12 +257,17 @@ public final class GalleryActivity extends ComponentActivity {
                 index + 1, items.size(), dateLabel));
         lightboxMeta.setVisibility(View.GONE);
         lightboxAiCard.setVisibility(View.GONE);
+        currentNegativeEntry = null;
+        lightboxRedevelop.setVisibility(View.GONE);
+        lightboxRedevelopDivider.setVisibility(View.GONE);
         lightboxOverlay.setVisibility(View.VISIBLE);
 
         worker.execute(() -> {
             Bitmap bmp = PhotoSaver.decodeScaledUri(this, item.uri, 2048);
             String exifSummary = PhotoSaver.readDisplayExifSummary(this, item.uri);
             AiCoachMath.AiAdvice cachedAi = prefs.getAiAdvice(item.uri.toString());
+            NegativeVault.Entry negEntry = NegativeVault.findNegative(
+                    this, item.uri, item.displayName);
             final String metaText = exifSummary;
             main.post(() -> {
                 if (lightboxIndex != index) {
@@ -267,6 +277,10 @@ public final class GalleryActivity extends ComponentActivity {
                 Bitmap old = lightboxBitmap;
                 lightboxBitmap = bmp;
                 lightboxImage.setImageBitmap(bmp);
+                currentNegativeEntry = negEntry;
+                int negVis = negEntry != null ? View.VISIBLE : View.GONE;
+                lightboxRedevelop.setVisibility(negVis);
+                lightboxRedevelopDivider.setVisibility(negVis);
                 if (!metaText.isEmpty()) {
                     lightboxMeta.setText(metaText);
                     lightboxMeta.setVisibility(View.VISIBLE);
@@ -277,6 +291,19 @@ public final class GalleryActivity extends ComponentActivity {
                 if (old != null && !old.isRecycled()) old.recycle();
             });
         });
+    }
+
+    private void onRedevelopTapped() {
+        if (currentNegativeEntry == null) return;
+        int initialIdx = FilmPresets.indexOfId(
+                prefs.getPresetId(FilmPresets.all()[FilmPresets.DEFAULT_INDEX].id));
+        DarkroomEditorDialog.showRedevelop(this, prefs, currentNegativeEntry, initialIdx,
+                (savedUri, thumb) -> {
+                    if (thumb != null && !thumb.isRecycled()) thumb.recycle();
+                    prefs.setLastPhotoUri(savedUri);
+                    closeLightbox();
+                    loadPhotos();
+                });
     }
 
     private void onAiCritiqueTapped() {
@@ -381,6 +408,9 @@ public final class GalleryActivity extends ComponentActivity {
     private void closeLightbox() {
         lightboxOverlay.setVisibility(View.GONE);
         lightboxAiCard.setVisibility(View.GONE);
+        currentNegativeEntry = null;
+        lightboxRedevelop.setVisibility(View.GONE);
+        lightboxRedevelopDivider.setVisibility(View.GONE);
         lightboxIndex = -1;
         lightboxImage.setImageDrawable(null);
         if (lightboxBitmap != null && !lightboxBitmap.isRecycled()) {
@@ -476,6 +506,18 @@ public final class GalleryActivity extends ComponentActivity {
 
     private void onPhotoRemoved(Uri uri) {
         if (uri == null) return;
+        String removedName = "";
+        for (PhotoSaver.PhotoItem it : items) {
+            if (uri.equals(it.uri)) {
+                removedName = it.displayName != null ? it.displayName : "";
+                break;
+            }
+        }
+        final String finalName = removedName;
+        try {
+            worker.execute(() -> NegativeVault.deleteForPrint(this, uri, finalName));
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
         Toast.makeText(this, R.string.gallery_deleted, Toast.LENGTH_SHORT).show();
         closeLightbox();
         thumbCache.remove(uri.toString());
