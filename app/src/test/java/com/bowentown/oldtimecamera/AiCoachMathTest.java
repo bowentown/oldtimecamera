@@ -157,6 +157,7 @@ public class AiCoachMathTest {
         String fenced = "<think>hmm</think>\n```json\n"
                 + "{\"instruction\":\"左移两步避开右侧杂物，手机举高微俯拍\","
                 + "\"poseTip\":\"看镜头左侧微侧脸\","
+                + "\"subjectX\":0.01,\"subjectY\":0.99,"
                 + "\"targetX\":0.05,\"targetY\":0.92,\"targetSize\":0.80,"
                 + "\"targetElevationDeg\":-40.0,\"recommendedPresetId\":\"daylight200\",\"evDelta\":-3.0}"
                 + "\n```";
@@ -167,6 +168,8 @@ public class AiCoachMathTest {
         assertEquals("左移两步避开右侧杂物，手机举高微俯拍 · 看镜头左侧微侧脸", plan.displayBannerText());
         assertEquals("daylight200", plan.recommendedPresetId);
         assertEquals(-2.0f, plan.evDelta, 0.01f);
+        assertEquals(0.05f, plan.subjectX, 0.001f);
+        assertEquals(0.95f, plan.subjectY, 0.001f);
         assertEquals(0.15f, plan.target.targetX, 0.001f);
         assertEquals(0.85f, plan.target.targetY, 0.001f);
         assertEquals(0.58f, plan.target.targetSize, 0.001f);
@@ -176,6 +179,7 @@ public class AiCoachMathTest {
         assertNotNull(plainFallback);
         assertEquals("站定往左走一步", plainFallback.instruction);
         assertEquals(0.50f, plainFallback.target.targetX, 0.001f);
+        assertTrue(Float.isNaN(plainFallback.subjectX));
 
         assertNull(AiCoachMath.parseDirectorPlan("<think>reasoning only</think>", false, true));
     }

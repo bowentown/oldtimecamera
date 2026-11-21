@@ -76,10 +76,10 @@
     <string name="assist_exposure">曝光轻提示</string>
     <string name="assist_steady_shutter">稳拍快门</string>
 
-    <string name="step3d_closer">往前走</string>
-    <string name="step3d_back">往后退</string>
-    <string name="step3d_left">往左移</string>
-    <string name="step3d_right">往右移</string>
+    <string name="step3d_closer">靠近一点</string>
+    <string name="step3d_back">拿远一点</string>
+    <string name="step3d_left">手机左移</string>
+    <string name="step3d_right">手机右移</string>
     <string name="step3d_up">手机抬高</string>
     <string name="step3d_down">手机放低</string>
     <string name="step3d_tilt_away">上沿前倾</string>

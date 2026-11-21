@@ -259,7 +259,11 @@ public final class ViewfinderOverlayView extends View {
                 && safeLabel.equals(drawingStepLabel)
                 && Math.abs(safe.intensity - targetCue.intensity) < 0.08f
                 && floatEqual(safe.subjectX, targetCue.subjectX, 0.015f)
-                && floatEqual(safe.subjectY, targetCue.subjectY, 0.015f);
+                && floatEqual(safe.subjectY, targetCue.subjectY, 0.015f)
+                && Math.abs(safe.offsetX - targetCue.offsetX) < 0.015f
+                && Math.abs(safe.offsetY - targetCue.offsetY) < 0.015f
+                && Math.abs(safe.offsetZ - targetCue.offsetZ) < 0.015f
+                && Math.abs(safe.offsetPitch - targetCue.offsetPitch) < 0.015f;
         if (sameCue) {
             return;
         }
@@ -767,19 +771,17 @@ public final class ViewfinderOverlayView extends View {
         float halfDepth = 1.6f * d;
         float focalLen = 42f * d;
 
-        float rawPhase = (SystemClock.uptimeMillis() % 1150L) / 1150f;
-        float lin = rawPhase < 0.78f ? (rawPhase / 0.78f) : 1f;
-        float u = lin * lin * (3f - 2f * lin);
+        float breath = (SystemClock.uptimeMillis() % 1400L) / 1400f;
+        CompositionMath.Pose3D cur = CompositionMath.poseForLiveCue(drawingCue, breath);
 
-        CompositionMath.Pose3D[] kf =
-                CompositionMath.keyframesForStep(drawingCue.step, drawingCue.intensity);
-        CompositionMath.Pose3D cur = CompositionMath.Pose3D.lerp(kf[0], kf[1], u);
-
+        // Stationary rangefinder target wireframe slot at center; amber 3D phone glides into coincidence.
         if (!isLocked) {
-            CompositionMath.projectPhoneCorners(kf[0], halfW, halfH, 0f, focalLen, ghostFrontPts);
-            ghostPhonePaint.setColor(0x55F0E8D8);
-            ghostPhonePaint.setAlpha(Math.round(85f * moveCueAlpha));
+            CompositionMath.projectPhoneCorners(
+                    CompositionMath.TARGET_POSE, halfW, halfH, -halfDepth, focalLen, ghostFrontPts);
+            ghostPhonePaint.setColor(0x99F0E8D8);
+            ghostPhonePaint.setAlpha(Math.round(135f * moveCueAlpha));
             drawQuad(canvas, ghostFrontPts, cx, stageCY, ghostPhonePaint);
+            drawEarpieceTick(canvas, ghostFrontPts, cx, stageCY, ghostPhonePaint);
         }
 
         CompositionMath.projectPhoneCorners(cur, halfW, halfH, -halfDepth, focalLen, curFrontPts);
@@ -796,8 +798,8 @@ public final class ViewfinderOverlayView extends View {
                     phoneSidePaint);
         }
 
-        phoneFillPaint.setColor(isLocked ? 0x44F2A65A : 0x26F2A65A);
-        phoneFillPaint.setAlpha(Math.round((isLocked ? 72f : 42f) * moveCueAlpha));
+        phoneFillPaint.setColor(isLocked ? 0x44F2A65A : 0x2AF2A65A);
+        phoneFillPaint.setAlpha(Math.round((isLocked ? 72f : 44f) * moveCueAlpha));
         drawQuad(canvas, curFrontPts, cx, stageCY, phoneFillPaint);
 
         moveGlyphPaint.setColor(isLocked ? 0xFFF2A65A : 0xFFF0E8D8);
@@ -805,18 +807,9 @@ public final class ViewfinderOverlayView extends View {
         moveGlyphPaint.setAlpha(Math.round(240f * moveCueAlpha));
         drawQuad(canvas, curFrontPts, cx, stageCY, moveGlyphPaint);
 
-        // Top earpiece tick projected on front bezel face for instant top-edge orientation.
-        float tlx = curFrontPts[0], tly = curFrontPts[1];
-        float trx = curFrontPts[2], trY = curFrontPts[3];
-        float brx = curFrontPts[4], bry = curFrontPts[5];
-        float blx = curFrontPts[6], bly = curFrontPts[7];
-        float ex1 = cx + tlx + (trx - tlx) * 0.34f + (blx - tlx) * 0.14f;
-        float ey1 = stageCY + tly + (trY - tly) * 0.34f + (bly - tly) * 0.14f;
-        float ex2 = cx + tlx + (trx - tlx) * 0.66f + (brx - trx) * 0.14f;
-        float ey2 = stageCY + tly + (trY - tly) * 0.66f + (bry - trY) * 0.14f;
         moveGlyphPaint.setColor(0xFFF2A65A);
         moveGlyphPaint.setAlpha(Math.round(235f * moveCueAlpha));
-        canvas.drawLine(ex1, ey1, ex2, ey2, moveGlyphPaint);
+        drawEarpieceTick(canvas, curFrontPts, cx, stageCY, moveGlyphPaint);
 
         drawStepGlyphAccessory(canvas, cx, stageCY, podW, d);
 
@@ -825,6 +818,18 @@ public final class ViewfinderOverlayView extends View {
             moveTextPaint.setAlpha(Math.round(240f * moveCueAlpha));
             canvas.drawText(drawingStepLabel, cx, tmpMoveRect.bottom - 4.8f * d, moveTextPaint);
         }
+    }
+
+    private static void drawEarpieceTick(Canvas canvas, float[] frontPts, float ox, float oy, Paint paint) {
+        float tlx = frontPts[0], tly = frontPts[1];
+        float trx = frontPts[2], trY = frontPts[3];
+        float brx = frontPts[4], bry = frontPts[5];
+        float blx = frontPts[6], bly = frontPts[7];
+        float ex1 = ox + tlx + (trx - tlx) * 0.34f + (blx - tlx) * 0.14f;
+        float ey1 = oy + tly + (trY - tly) * 0.34f + (bly - tly) * 0.14f;
+        float ex2 = ox + tlx + (trx - tlx) * 0.66f + (brx - trx) * 0.14f;
+        float ey2 = oy + tly + (trY - tly) * 0.66f + (bry - trY) * 0.14f;
+        canvas.drawLine(ex1, ey1, ex2, ey2, paint);
     }
 
     private void drawQuad(Canvas canvas, float[] pts, float ox, float oy, Paint paint) {

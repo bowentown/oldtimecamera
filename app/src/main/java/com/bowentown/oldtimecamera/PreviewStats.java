@@ -26,6 +26,8 @@ public final class PreviewStats {
     public final float saliencySpread;
     public final float borderEdgeRatio;
     public final float[] lumaBins;
+    /** Optional top-left row-major RGB bytes ({@code width * height * 3}) from raw preview frame. */
+    public final byte[] thumbRgb;
 
     public PreviewStats(
             int width,
@@ -44,7 +46,7 @@ public final class PreviewStats {
             float saliencyConfidence) {
         this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
                 avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence, null,
-                0.25f, 0f);
+                0.25f, 0f, null);
     }
 
     public PreviewStats(
@@ -65,7 +67,7 @@ public final class PreviewStats {
             float[] lumaBins) {
         this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
                 avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence,
-                lumaBins, 0.25f, 0f);
+                lumaBins, 0.25f, 0f, null);
     }
 
     public PreviewStats(
@@ -86,6 +88,30 @@ public final class PreviewStats {
             float[] lumaBins,
             float saliencySpread,
             float borderEdgeRatio) {
+        this(width, height, meanLuma, clippedHighlights, crushedShadows, centerLuma, borderLuma,
+                avgR, avgG, avgB, meanSaturation, saliencyX, saliencyY, saliencyConfidence,
+                lumaBins, saliencySpread, borderEdgeRatio, null);
+    }
+
+    public PreviewStats(
+            int width,
+            int height,
+            float meanLuma,
+            float clippedHighlights,
+            float crushedShadows,
+            float centerLuma,
+            float borderLuma,
+            float avgR,
+            float avgG,
+            float avgB,
+            float meanSaturation,
+            float saliencyX,
+            float saliencyY,
+            float saliencyConfidence,
+            float[] lumaBins,
+            float saliencySpread,
+            float borderEdgeRatio,
+            byte[] thumbRgb) {
         this.width = width;
         this.height = height;
         this.meanLuma = clamp01(meanLuma);
@@ -110,6 +136,16 @@ public final class PreviewStats {
             }
         }
         this.lumaBins = bins;
+        this.thumbRgb = thumbRgb;
+    }
+
+    /** Returns a copy carrying {@code rgb} ({@code width * height * 3}) for local patch tracking. */
+    public PreviewStats withThumbRgb(byte[] rgb) {
+        return new PreviewStats(
+                width, height, meanLuma, clippedHighlights, crushedShadows,
+                centerLuma, borderLuma, avgR, avgG, avgB, meanSaturation,
+                saliencyX, saliencyY, saliencyConfidence, lumaBins,
+                saliencySpread, borderEdgeRatio, rgb);
     }
 
     /**
@@ -125,6 +161,7 @@ public final class PreviewStats {
 
         int n = width * height;
         float[] luma = new float[n];
+        byte[] rgbBytes = new byte[n * 3];
         int[] binCounts = new int[LUMA_BIN_COUNT];
         double sumL = 0.0;
         double sumR = 0.0;
@@ -148,11 +185,19 @@ public final class PreviewStats {
             int topY = bottomUp ? (height - 1 - row) : row;
             int srcRowOff = row * width * 4;
             int dstRowOff = topY * width;
+            int rgbRowOff = dstRowOff * 3;
             for (int x = 0; x < width; x++) {
                 int idx = srcRowOff + x * 4;
-                float r = (rgba[idx] & 0xFF) / 255f;
-                float g = (rgba[idx + 1] & 0xFF) / 255f;
-                float b = (rgba[idx + 2] & 0xFF) / 255f;
+                byte rb = rgba[idx];
+                byte gb = rgba[idx + 1];
+                byte bb = rgba[idx + 2];
+                int rgbOff = rgbRowOff + x * 3;
+                rgbBytes[rgbOff] = rb;
+                rgbBytes[rgbOff + 1] = gb;
+                rgbBytes[rgbOff + 2] = bb;
+                float r = (rb & 0xFF) / 255f;
+                float g = (gb & 0xFF) / 255f;
+                float b = (bb & 0xFF) / 255f;
                 float yVal = 0.2126f * r + 0.7152f * g + 0.0722f * b;
 
                 luma[dstRowOff + x] = yVal;
@@ -261,7 +306,8 @@ public final class PreviewStats {
                 salConf,
                 bins,
                 salSpread,
-                borderEdges
+                borderEdges,
+                rgbBytes
         );
     }
 

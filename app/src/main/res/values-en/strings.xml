@@ -76,10 +76,10 @@
     <string name="assist_exposure">Exposure Hint</string>
     <string name="assist_steady_shutter">Steady Shutter</string>
 
-    <string name="step3d_closer">Step closer</string>
-    <string name="step3d_back">Step back</string>
-    <string name="step3d_left">Move left</string>
-    <string name="step3d_right">Move right</string>
+    <string name="step3d_closer">Move closer</string>
+    <string name="step3d_back">Move back</string>
+    <string name="step3d_left">Phone left</string>
+    <string name="step3d_right">Phone right</string>
     <string name="step3d_up">Raise phone</string>
     <string name="step3d_down">Lower phone</string>
     <string name="step3d_tilt_away">Tilt top away</string>

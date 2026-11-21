@@ -248,7 +248,7 @@ final class GLFilmRenderer implements GLSurfaceView.Renderer,
 
     private static final int METER_W = 32;
     private static final int METER_H = 24;
-    private static final long METER_INTERVAL_MS = 300L;
+    private static final long METER_INTERVAL_MS = 90L;
 
     private SurfaceTexture surfaceTexture;
     private int oesTextureId;

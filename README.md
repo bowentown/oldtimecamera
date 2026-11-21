@@ -1,6 +1,6 @@
 # 旧时光相机 · Old Time Camera
 
-一个克制、优雅的 Android 纯本地胶片相机（`v1.9.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
+一个克制、优雅的 Android 纯本地胶片相机（`v1.10.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
 实时预览与全分辨率成片共用同一套 OpenGL ES 片元着色器，拍摄或导入洗印后叠上相纸边框、编号与复古橙色日期背印，写入系统相册并保留相机拍摄 EXIF 元数据。
 
 默认全离线运行、无账号、无统计/广告 SDK。网络访问**仅在用户主动点击**时发生：暗房面板里的「检查更新」（GitHub Releases API）与可选的 **BYOK AI 摄影导师**（支持自带 DeepSeek `deepseek-flash` / 通义千问 VL / OpenAI / 自定义兼容接口 API Key，经 `AndroidKeyStore` 加密保存在本机，绝不后台扫描或偷跑流量）。
@@ -14,12 +14,12 @@
   - 统一接入开源线性图标族 **Phosphor Icons**（Regular，MIT）与内置等宽字体 **JetBrains Mono Regular**（OFL 1.1），确保帧数计数、EV、焦段与底片页码具备一致的光学器械精密感。
   - 取景器与底栏分区明晰，切换画幅时仿旁轴相机的遮幅帘幕平滑收合；支持点击或长按取景框右下角橙色 LED 日期直接切换/隐藏日期印记。
 - **3D 实景空间引导与轻辅助**：
-  - **3D 迷你手机空间引导胶囊**：结合 Camera2 人脸边界（`mapSensorBoxToActiveFrame`）、点按对焦点、`32×24` 显著性重心/离散度与 3 轴加速度计俯仰仰角融合（`computeCameraElevationDegrees` + `computeHandTiltStep`），在取景框底部中央悬浮一颗半透明暗房 3D 线框迷你手机投影胶囊——每次仅聚焦最关键的**单步动作**（`往前走 / 往后退 / 往左移 / 往右移 / 手机抬高 / 手机放低 / 上沿前倾 / 上沿内扣`），到点后亮金光反馈并自动淡出，绝不在脸上划线。
+  - **旁轴双影重合式 3D 迷你手机胶囊**：日常模式下仅在明确存在主体（Camera2 硬件人脸、`5×5` RGB+亮度块追踪点选物或 AI 实景导演）时激活，彻底避免复杂背景触发乱跳提示；结合多锚点宽甜区（居中与三分线 `[0.22, 0.78]` 横向舒适区、`±12%` 坐标 / `±8°` 俯仰甜区）与过线锁定防反跳迟滞（`±18%` / `±13.5°` 反向锁定阈值），底部中央琥珀 3D 迷你手机随剩余误差实时平滑滑入中心虚线框，每次聚焦单步动作（`靠近一点 / 拿远一点 / 手机左移 / 手机右移 / 手机抬高 / 手机放低 / 上沿前倾 / 上沿内扣`），重合瞬间亮金震动确认并自动淡出。
   - **纯净取景辅助线**：顶部网格按钮循环切换 `关 → 三分线 → 黄金螺旋 → 中心十字`（黄金螺旋模式下长按旋转 `90°` 起始方向），搭配机械风格实时水平仪。
-  - **曝光轻提示（单行轻点一键修正）**：`GLFilmRenderer` 从主预览流下采样 `32×24` 原始帧，`ExposureAdvisor` 仅在过曝、欠曝或明显逆光时显示可点单行轻提示，点击直接补偿 EV 或对主体测光，无操作自动淡出。
+  - **曝光轻提示（单行轻点一键修正）**：`GLFilmRenderer` 以 ~11 Hz 从主预览流下采样 `32×24` 原始帧，`ExposureAdvisor` 仅在过曝、欠曝或明显逆光时显示可点单行轻提示，点击直接补偿 EV 或对主体测光，无操作自动淡出。
   - **稳拍快门**：`StabilityMeter` 基于陀螺仪角速率（无陀螺仪回退高通加速度计）判断手抖状态；开启后按快门会在快门外环绘制最长 `1.5s` 的琥珀等待弧，持稳、超时或再次点按快门立即成像。
 - **BYOK AI 实景导演（「指哪打哪」取景指导）**：
-  - **无底栏遮挡的取景器直导**：点击取景器左下角图标仅在当次抓取预览帧与俯仰光表参数发送至模型（针对 DeepSeek 自动传入 `thinking: {"type": "disabled"}` 并过滤 `reasoning_content`）；AI 返回大白话动作/走位句（显示于顶部单行提示，可随时点 `×` 退出）与归一化 `(targetX, targetY, targetSize, targetElevationDeg)` 目标坐标，并**自动套用**推荐胶片与 EV。取景画面直接出现四角落点取景框，配合 3D 迷你手机实时引导；走位与角度齐平后目标框与快门外环点亮暖金锁框提示，按快门成片后自动结束本次导拍。
+  - **无底栏遮挡的取景器直导**：点击取景器左下角图标仅在当次抓取预览帧与俯仰光表参数发送至模型（针对 DeepSeek 自动传入 `thinking: {"type": "disabled"}` 并过滤 `reasoning_content`）；AI 返回大白话动作/走位句（显示于顶部单行提示，可随时点 `×` 退出）、初始主体锁定坐标 `(subjectX, subjectY)` 与归一化 `(targetX, targetY, targetSize, targetElevationDeg)` 目标坐标，并**自动套用**推荐胶片与 EV。取景画面直接出现四角落点取景框，配合旁轴双影 3D 迷你手机实时引导；走位与角度齐平后目标框与快门外环点亮暖金锁框提示，按快门成片后自动结束本次导拍。
   - **一句话 AI 调色配方师**：长按底栏胶片胶囊呼出配方面板点 `✦ AI 调色`，输入电影感/光线描述即可联动匹配基底胶片、浓度/颗粒/冷暖与黑柔光开关并实时预览。
   - **暗房灯箱 AI 复盘**：在底片灯箱点 `AI 点评`，结合成片与 EXIF 输出「诊断 + 改法」并本地缓存结果。
 - **十卷自有命名胶片**（色彩矩阵 + S 曲线 + 双重银盐颗粒 + Halation 高光晕 + 光学暗角 + 漏光 + 配套相纸）：
@@ -87,7 +87,7 @@
 需要 JDK 17、Android SDK（platform 36 + build-tools 36.0.0），并配置 `ANDROID_HOME` / `local.properties`：
 
 ```bash
-./gradlew testDebugUnitTest  # 运行 9 个 JVM 单元测试类（56 项测试）
+./gradlew testDebugUnitTest  # 运行 9 个 JVM 单元测试类（60 项测试）
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 需 keystore.properties，否则产出 unsigned 包
 ```
@@ -123,8 +123,8 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── FilmRenderMath.java         颗粒尺度一致性、黑柔光步长与指针测光停档换算（纯 Java）
 ├── FilmRecipe.java             胶片浓度/颗粒/冷暖自定义配方合成与存储（纯 Java）
 ├── CameraTransformMath.java    GL UV 矩阵、hasCameraTransform 双路径、EXIF 与方向量化
-├── CompositionMath.java        构图几何、3D 俯仰融合与透视投影、单步 3D 引导及 AI 导演状态机
-├── PreviewStats.java           32×24 原始帧亮度/12 档分布/高光/死黑/色温/显著性重心与离散度
+├── CompositionMath.java        构图几何、3D 俯仰/旁轴重合姿态、5×5 块追踪及零穿越锁定 3D 引导状态机
+├── PreviewStats.java           32×24 原始帧 RGB 缩略图、亮度/12 档分布/高光/死黑/色温与显著性统计
 ├── ExposureAdvisor.java        实时曝光轻提示与迟滞状态机
 ├── StabilityMeter.java         滑动窗口 RMS 手抖检测（稳拍快门判定）
 ├── FilmPreset.java             胶片配方参数模型
@@ -141,7 +141,7 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── UpdateChecker.java          GitHub Releases 检查更新与证书校验安装
 └── VersionMath.java            语义化版本比较（纯 Java）
 app/src/main/assets/licenses/   MIT、OFL、NOTICE 全文（随 APK 分发）
-app/src/test/java/com/bowentown/oldtimecamera/   9 个纯 JVM 测试类（56 项测试）
+app/src/test/java/com/bowentown/oldtimecamera/   9 个纯 JVM 测试类（60 项测试）
 LICENSES/                       仓库侧第三方许可全文
 NOTICE                          专有声明 + 第三方资产例外 + 商标说明
 docs/                           OFL 原文与开源项目调研

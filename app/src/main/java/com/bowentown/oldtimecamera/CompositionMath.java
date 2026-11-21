@@ -326,10 +326,11 @@ public final class CompositionMath {
         }
     }
 
-    /** Immutable 3D HUD instruction + optional AI director target frame in normalized [0..1] coords. */
+    /** Immutable 3D HUD instruction + optional AI director target frame + signed live offsets. */
     public static final class Guide3DCue {
         public static final Guide3DCue EMPTY = new Guide3DCue(
-                Step3D.NONE, 0f, false, false, Float.NaN, Float.NaN, 0f, 0f, 0f, 0f);
+                Step3D.NONE, 0f, false, false, Float.NaN, Float.NaN, 0f, 0f, 0f, 0f,
+                0f, 0f, 0f, 0f);
 
         public final Step3D step;
         public final float intensity;
@@ -341,11 +342,25 @@ public final class CompositionMath {
         public final float targetBoxTop;
         public final float targetBoxRight;
         public final float targetBoxBottom;
+        public final float offsetX;
+        public final float offsetY;
+        public final float offsetZ;
+        public final float offsetPitch;
 
         public Guide3DCue(Step3D step, float intensity, boolean directorActive, boolean locked,
                           float subjectX, float subjectY,
                           float targetBoxLeft, float targetBoxTop,
                           float targetBoxRight, float targetBoxBottom) {
+            this(step, intensity, directorActive, locked, subjectX, subjectY,
+                    targetBoxLeft, targetBoxTop, targetBoxRight, targetBoxBottom,
+                    0f, 0f, 0f, 0f);
+        }
+
+        public Guide3DCue(Step3D step, float intensity, boolean directorActive, boolean locked,
+                          float subjectX, float subjectY,
+                          float targetBoxLeft, float targetBoxTop,
+                          float targetBoxRight, float targetBoxBottom,
+                          float offsetX, float offsetY, float offsetZ, float offsetPitch) {
             this.step = step != null ? step : Step3D.NONE;
             this.intensity = clamp01(intensity);
             this.directorActive = directorActive;
@@ -356,6 +371,10 @@ public final class CompositionMath {
             this.targetBoxTop = clamp01(targetBoxTop);
             this.targetBoxRight = clamp01(targetBoxRight);
             this.targetBoxBottom = clamp01(targetBoxBottom);
+            this.offsetX = clampRange(offsetX, -1f, 1f);
+            this.offsetY = clampRange(offsetY, -1f, 1f);
+            this.offsetZ = clampRange(offsetZ, -1f, 1f);
+            this.offsetPitch = clampRange(offsetPitch, -1f, 1f);
         }
 
         public boolean isEmpty() {
@@ -410,6 +429,9 @@ public final class CompositionMath {
         }
     }
 
+    /** Stationary center target pose for the rangefinder coincidence 3D pod. */
+    public static final Pose3D TARGET_POSE = new Pose3D(0f, 0f, 0f, 8f, 12f);
+
     /**
      * Optical-axis elevation in degrees from accelerometer gravity {@code (gx, gy, gz)}.
      * Positive when lens points UP (仰拍); negative when lens points DOWN (俯拍).
@@ -430,6 +452,59 @@ public final class CompositionMath {
         float deltaElev = targetElevationDeg - currentElevationDeg;
         float deltaScreenBackTilt = facingFront ? deltaElev : -deltaElev;
         return deltaScreenBackTilt >= 0f ? Step3D.TILT_TOP_AWAY : Step3D.TILT_TOP_TOWARD;
+    }
+
+    /**
+     * Computes live rangefinder coincidence pose driven proportionally by signed remaining error.
+     * Moving the phone in the suggested direction smoothly glides the live phone toward {@link #TARGET_POSE}.
+     */
+    public static Pose3D poseForLiveCue(Guide3DCue cue, float breathZeroToOne) {
+        if (cue == null || cue.step == Step3D.NONE || cue.step == Step3D.LOCKED) {
+            return TARGET_POSE;
+        }
+        float rawMag;
+        switch (cue.step) {
+            case MOVE_LEFT:
+            case MOVE_RIGHT:
+                rawMag = Math.abs(cue.offsetX) > 0.01f ? Math.abs(cue.offsetX) : cue.intensity;
+                break;
+            case MOVE_UP:
+            case MOVE_DOWN:
+                rawMag = Math.abs(cue.offsetY) > 0.01f ? Math.abs(cue.offsetY) : cue.intensity;
+                break;
+            case STEP_CLOSER:
+            case STEP_BACK:
+                rawMag = Math.abs(cue.offsetZ) > 0.01f ? Math.abs(cue.offsetZ) : cue.intensity;
+                break;
+            case TILT_TOP_AWAY:
+            case TILT_TOP_TOWARD:
+                rawMag = Math.abs(cue.offsetPitch) > 0.01f ? Math.abs(cue.offsetPitch) : cue.intensity;
+                break;
+            default:
+                return TARGET_POSE;
+        }
+        float pulse = (float) Math.sin(clamp01(breathZeroToOne) * Math.PI * 2.0);
+        float mag = clampRange(Math.max(0.14f, rawMag) - 0.06f * pulse, 0.05f, 1.0f);
+        switch (cue.step) {
+            case MOVE_LEFT:
+                return new Pose3D(+0.72f * mag, 0f, 0f, 8f, 12f + 12f * mag);
+            case MOVE_RIGHT:
+                return new Pose3D(-0.72f * mag, 0f, 0f, 8f, 12f - 18f * mag);
+            case MOVE_UP:
+                return new Pose3D(0f, +0.56f * mag, 0f, 8f, 12f);
+            case MOVE_DOWN:
+                return new Pose3D(0f, -0.56f * mag, 0f, 8f, 12f);
+            case STEP_CLOSER:
+                return new Pose3D(0f, -0.14f * mag, +0.95f * mag, 8f, 12f);
+            case STEP_BACK:
+                return new Pose3D(0f, +0.12f * mag, -0.36f * mag, 8f, 12f);
+            case TILT_TOP_AWAY:
+                return new Pose3D(0f, 0f, 0f, 8f - 32f * mag, 12f);
+            case TILT_TOP_TOWARD:
+                return new Pose3D(0f, 0f, 0f, 8f + 32f * mag, 12f);
+            default:
+                return TARGET_POSE;
+        }
     }
 
     /** Returns {@code {startPose, endPose}} keyframes for smoothstep 3D mini-phone animation. */
@@ -517,11 +592,219 @@ public final class CompositionMath {
     }
 
     /**
-     * Stateful anti-flicker single-step evaluator prioritizing Depth -> Translation -> 3D Pitch
-     * with brief alignment confirmation in normal mode and persistent gold lock in AI Director mode.
+     * Pure-Java lightweight 5x5 RGB+Luma SAD patch tracker operating on 32x24 {@link PreviewStats#thumbRgb}
+     * frames so tapped non-face subjects stay tracked across hand movement without global background drift.
+     */
+    public static final class SubjectPatchTracker {
+        private static final int PATCH_R = 2;
+        private static final int PATCH_SIZE = 5;
+        private static final int SEARCH_R = 7;
+        private static final float MIN_CONTRAST_LUMA = 0.08f;
+        private static final float MAX_MEAN_SAD = 0.22f;
+        private static final long TTL_MS = 10_000L;
+
+        private boolean active = false;
+        private int patchW = 0;
+        private int patchH = 0;
+        private final float[] tplR = new float[PATCH_SIZE * PATCH_SIZE];
+        private final float[] tplG = new float[PATCH_SIZE * PATCH_SIZE];
+        private final float[] tplB = new float[PATCH_SIZE * PATCH_SIZE];
+        private final float[] tplL = new float[PATCH_SIZE * PATCH_SIZE];
+        private float curX = Float.NaN;
+        private float curY = Float.NaN;
+        private long lockedAtMs = 0L;
+        private int failStreak = 0;
+
+        public void reset() {
+            active = false;
+            patchW = 0;
+            patchH = 0;
+            curX = Float.NaN;
+            curY = Float.NaN;
+            lockedAtMs = 0L;
+            failStreak = 0;
+        }
+
+        public boolean isActive() {
+            return active && !Float.isNaN(curX) && !Float.isNaN(curY);
+        }
+
+        public float getX() {
+            return curX;
+        }
+
+        public float getY() {
+            return curY;
+        }
+
+        public boolean lock(PreviewStats stats, float normX, float normY, long nowMs) {
+            if (stats == null || stats.thumbRgb == null
+                    || stats.width < 8 || stats.height < 8
+                    || stats.thumbRgb.length < stats.width * stats.height * 3
+                    || Float.isNaN(normX) || Float.isNaN(normY)) {
+                reset();
+                return false;
+            }
+            int w = stats.width;
+            int h = stats.height;
+            int cx = clampInt(Math.round(clamp01(normX) * w - 0.5f), PATCH_R, w - 1 - PATCH_R);
+            int cy = clampInt(Math.round(clamp01(normY) * h - 0.5f), PATCH_R, h - 1 - PATCH_R);
+
+            float minL = 1f;
+            float maxL = 0f;
+            int idx = 0;
+            for (int dy = -PATCH_R; dy <= PATCH_R; dy++) {
+                int rowOff = (cy + dy) * w;
+                for (int dx = -PATCH_R; dx <= PATCH_R; dx++) {
+                    int off = (rowOff + (cx + dx)) * 3;
+                    float r = (stats.thumbRgb[off] & 0xFF) / 255f;
+                    float g = (stats.thumbRgb[off + 1] & 0xFF) / 255f;
+                    float b = (stats.thumbRgb[off + 2] & 0xFF) / 255f;
+                    float l = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                    tplR[idx] = r;
+                    tplG[idx] = g;
+                    tplB[idx] = b;
+                    tplL[idx] = l;
+                    if (l < minL) minL = l;
+                    if (l > maxL) maxL = l;
+                    idx++;
+                }
+            }
+            if ((maxL - minL) < MIN_CONTRAST_LUMA) {
+                reset();
+                return false;
+            }
+            active = true;
+            patchW = w;
+            patchH = h;
+            curX = (cx + 0.5f) / w;
+            curY = (cy + 0.5f) / h;
+            lockedAtMs = nowMs;
+            failStreak = 0;
+            return true;
+        }
+
+        public boolean update(PreviewStats stats, long nowMs) {
+            if (!active) return false;
+            if ((nowMs - lockedAtMs) > TTL_MS) {
+                reset();
+                return false;
+            }
+            if (stats == null || stats.thumbRgb == null
+                    || stats.width != patchW || stats.height != patchH
+                    || stats.thumbRgb.length < patchW * patchH * 3) {
+                return true;
+            }
+            int w = patchW;
+            int h = patchH;
+            int predX = clampInt(Math.round(curX * w - 0.5f), PATCH_R, w - 1 - PATCH_R);
+            int predY = clampInt(Math.round(curY * h - 0.5f), PATCH_R, h - 1 - PATCH_R);
+            int minCx = Math.max(PATCH_R, predX - SEARCH_R);
+            int maxCx = Math.min(w - 1 - PATCH_R, predX + SEARCH_R);
+            int minCy = Math.max(PATCH_R, predY - SEARCH_R);
+            int maxCy = Math.min(h - 1 - PATCH_R, predY + SEARCH_R);
+
+            int bestX = predX;
+            int bestY = predY;
+            float bestScore = Float.MAX_VALUE;
+            float bestSad = Float.MAX_VALUE;
+
+            for (int cy = minCy; cy <= maxCy; cy++) {
+                for (int cx = minCx; cx <= maxCx; cx++) {
+                    float sad = patchMeanSad(stats.thumbRgb, w, cx, cy);
+                    float distPenalty = 0.012f * (float) Math.hypot(cx - predX, cy - predY);
+                    float score = sad + distPenalty;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestSad = sad;
+                        bestX = cx;
+                        bestY = cy;
+                    }
+                }
+            }
+
+            if (bestSad > MAX_MEAN_SAD) {
+                failStreak++;
+                if (failStreak >= 3) {
+                    reset();
+                    return false;
+                }
+                return true;
+            }
+            failStreak = 0;
+
+            double sumW = 0.0;
+            double sumX = 0.0;
+            double sumY = 0.0;
+            for (int oy = -1; oy <= 1; oy++) {
+                int ny = bestY + oy;
+                if (ny < PATCH_R || ny > h - 1 - PATCH_R) continue;
+                for (int ox = -1; ox <= 1; ox++) {
+                    int nx = bestX + ox;
+                    if (nx < PATCH_R || nx > w - 1 - PATCH_R) continue;
+                    float s = patchMeanSad(stats.thumbRgb, w, nx, ny);
+                    double weight = Math.max(0.0, (bestSad + 0.04) - s);
+                    sumW += weight;
+                    sumX += nx * weight;
+                    sumY += ny * weight;
+                }
+            }
+            float subX = sumW > 1e-6 ? (float) (sumX / sumW) : bestX;
+            float subY = sumW > 1e-6 ? (float) (sumY / sumW) : bestY;
+            curX = clamp01((subX + 0.5f) / w);
+            curY = clamp01((subY + 0.5f) / h);
+            if (curX < 0.03f || curX > 0.97f || curY < 0.03f || curY > 0.97f) {
+                failStreak++;
+                if (failStreak >= 3) {
+                    reset();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private float patchMeanSad(byte[] rgb, int w, int cx, int cy) {
+            float acc = 0f;
+            int idx = 0;
+            for (int dy = -PATCH_R; dy <= PATCH_R; dy++) {
+                int rowOff = (cy + dy) * w;
+                for (int dx = -PATCH_R; dx <= PATCH_R; dx++) {
+                    int off = (rowOff + (cx + dx)) * 3;
+                    float r = (rgb[off] & 0xFF) / 255f;
+                    float g = (rgb[off + 1] & 0xFF) / 255f;
+                    float b = (rgb[off + 2] & 0xFF) / 255f;
+                    float l = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                    acc += Math.abs(r - tplR[idx])
+                            + Math.abs(g - tplG[idx])
+                            + Math.abs(b - tplB[idx])
+                            + Math.abs(l - tplL[idx]);
+                    idx++;
+                }
+            }
+            return acc / (4f * PATCH_SIZE * PATCH_SIZE);
+        }
+
+        private static int clampInt(int v, int min, int max) {
+            return Math.max(min, Math.min(max, v));
+        }
+    }
+
+    /**
+     * Stateful anti-oscillation single-step evaluator prioritizing Depth -> Translation -> 3D Pitch.
+     * Normal mode activates only for explicit subjects (detected face or patch-tracked tap target)
+     * with wide comfort zones and a sign-aware zero-crossing lock latch.
      */
     public static final class MoveGuideState {
-        private int lastSourceTag = 0; // 0=none, 1=face, 2=tap, 3=saliency
+        private static final float PAN_ENTER = 0.15f;
+        private static final float PAN_SWEET_EXIT = 0.12f;
+        private static final float PAN_LATCH_ESCAPE = 0.18f;
+        private static final float PITCH_ENTER_DEG = 12.0f;
+        private static final float PITCH_SWEET_EXIT_DEG = 8.0f;
+        private static final float PITCH_LATCH_ESCAPE_DEG = 13.5f;
+        private static final long NORMAL_LOCK_DISPLAY_MS = 800L;
+        private static final long NORMAL_POST_LOCK_GRACE_MS = 1500L;
+
+        private int lastSourceTag = 0; // 0=none, 1=face, 2=tracked, 3=director saliency fallback
         private boolean hasSmoothedPos = false;
         private float smoothX = 0.5f;
         private float smoothY = 0.5f;
@@ -532,6 +815,7 @@ public final class CompositionMath {
         private Step3D activeStep = Step3D.NONE;
         private long guidedSinceMs = 0L;
         private long lockedUntilMs = 0L;
+        private long postLockGraceUntilMs = 0L;
         private boolean lastDirectorMode = false;
 
         public void reset() {
@@ -545,15 +829,16 @@ public final class CompositionMath {
             activeStep = Step3D.NONE;
             guidedSinceMs = 0L;
             lockedUntilMs = 0L;
+            postLockGraceUntilMs = 0L;
             lastDirectorMode = false;
         }
 
         public Guide3DCue evaluate(
                 boolean hasFace,
                 ActiveBox faceBox,
-                boolean hasTapSubject,
-                float tapX,
-                float tapY,
+                boolean hasTrackedSubject,
+                float trackedX,
+                float trackedY,
                 PreviewStats stats,
                 GridMode gridMode,
                 int goldenRotSteps,
@@ -566,6 +851,7 @@ public final class CompositionMath {
                 activeStep = Step3D.NONE;
                 guidedSinceMs = 0L;
                 lockedUntilMs = 0L;
+                postLockGraceUntilMs = 0L;
                 lastDirectorMode = director;
             }
 
@@ -573,7 +859,7 @@ public final class CompositionMath {
                 hasSmoothedElev = true;
                 smoothElevDeg = cameraElevationDeg;
             } else {
-                smoothElevDeg = smoothElevDeg + (cameraElevationDeg - smoothElevDeg) * 0.35f;
+                smoothElevDeg = smoothElevDeg + (cameraElevationDeg - smoothElevDeg) * 0.65f;
             }
 
             int sourceTag = 0;
@@ -583,11 +869,11 @@ public final class CompositionMath {
                 sourceTag = 1;
                 rawX = faceBox.centerX();
                 rawY = clamp01(faceBox.top + (faceBox.bottom - faceBox.top) * 0.42f);
-            } else if (hasTapSubject && !Float.isNaN(tapX) && !Float.isNaN(tapY)) {
+            } else if (hasTrackedSubject && !Float.isNaN(trackedX) && !Float.isNaN(trackedY)) {
                 sourceTag = 2;
-                rawX = clamp01(tapX);
-                rawY = clamp01(tapY);
-            } else if (stats != null && stats.saliencyConfidence >= 0.24f) {
+                rawX = clamp01(trackedX);
+                rawY = clamp01(trackedY);
+            } else if (director && stats != null && stats.saliencyConfidence >= 0.35f) {
                 sourceTag = 3;
                 rawX = stats.saliencyX;
                 rawY = stats.saliencyY;
@@ -601,6 +887,7 @@ public final class CompositionMath {
                     activeStep = Step3D.NONE;
                     guidedSinceMs = 0L;
                     lockedUntilMs = 0L;
+                    postLockGraceUntilMs = 0L;
                     return Guide3DCue.EMPTY;
                 }
             } else if (sourceTag != lastSourceTag || !hasSmoothedPos) {
@@ -610,75 +897,97 @@ public final class CompositionMath {
                 smoothY = rawY;
                 smoothFaceH = (sourceTag == 1) ? faceBox.rawHeight : 0f;
             } else {
-                smoothX = smoothX + (rawX - smoothX) * 0.42f;
-                smoothY = smoothY + (rawY - smoothY) * 0.42f;
+                smoothX = smoothX + (rawX - smoothX) * 0.72f;
+                smoothY = smoothY + (rawY - smoothY) * 0.72f;
                 smoothFaceH = (sourceTag == 1)
-                        ? (smoothFaceH + (faceBox.rawHeight - smoothFaceH) * 0.35f)
+                        ? (smoothFaceH + (faceBox.rawHeight - smoothFaceH) * 0.60f)
                         : 0f;
             }
 
             boolean faceSource = (sourceTag == 1);
+            boolean strictLatch = activeStep == Step3D.LOCKED || nowMs < postLockGraceUntilMs;
             Step3D nextStep = Step3D.NONE;
             float strength = 0f;
+            float signedErrX = 0f;
+            float signedErrY = 0f;
+            float signedErrZ = 0f;
+            float signedErrPitch = 0f;
 
             // Priority 1: Depth (step back / step closer)
-            Step3D depthStep = evaluateDepthStep(faceSource, faceBox, stats, directorTarget);
+            Step3D depthStep = evaluateDepthStep(faceSource, faceBox, stats, directorTarget, strictLatch);
             if (depthStep != Step3D.NONE) {
                 nextStep = depthStep;
-                strength = 0.7f;
+                float targetSz = director ? directorTarget.targetSize : (depthStep == Step3D.STEP_BACK ? 0.34f : 0.16f);
+                float curSz = faceSource ? smoothFaceH : (stats != null ? stats.saliencySpread * 1.45f : targetSz);
+                float diffZ = targetSz - curSz;
+                signedErrZ = clampRange(diffZ / 0.25f, -1f, 1f);
+                strength = Math.max(0.35f, Math.abs(signedErrZ));
             }
 
-            // Priority 2: Single dominant pan direction (X vs Y)
-            if (nextStep == Step3D.NONE && hasSmoothedPos) {
-                float dx = 0f;
-                float dy = 0f;
+            // Priority 2: Single dominant pan direction (X vs Y) with sign-aware zero-crossing lock
+            if (hasSmoothedPos) {
+                GridMode mode = gridMode != null ? gridMode : GridMode.OFF;
+                float dx;
+                float dy;
+                boolean singleTarget;
                 if (director) {
+                    singleTarget = true;
                     dx = directorTarget.targetX - smoothX;
                     dy = directorTarget.targetY - smoothY;
+                } else if (mode == GridMode.CROSSHAIR || mode == GridMode.GOLDEN_SPIRAL) {
+                    singleTarget = true;
+                    float[] target = pickGridTarget(smoothX, smoothY, faceSource, mode, goldenRotSteps);
+                    dx = target[0] - smoothX;
+                    dy = target[1] - smoothY;
                 } else {
-                    GridMode mode = gridMode != null ? gridMode : GridMode.OFF;
-                    if (mode != GridMode.OFF) {
-                        float[] target = pickGridTarget(smoothX, smoothY, faceSource, mode, goldenRotSteps);
-                        dx = target[0] - smoothX;
-                        dy = target[1] - smoothY;
-                    } else {
-                        dx = balancedDeltaX(smoothX, faceSource, faceBox);
-                        dy = balancedDeltaY(smoothY, faceSource, faceBox);
-                    }
+                    singleTarget = false;
+                    dx = balancedDeltaX(smoothX, faceSource, faceBox);
+                    dy = balancedDeltaY(smoothY, faceSource, faceBox);
                 }
 
-                float enter = 0.085f;
-                float exit = 0.050f;
-                boolean wasX = (activeStep == Step3D.MOVE_LEFT || activeStep == Step3D.MOVE_RIGHT);
-                boolean wasY = (activeStep == Step3D.MOVE_UP || activeStep == Step3D.MOVE_DOWN);
-                boolean xNeed = wasX ? (Math.abs(dx) > exit) : (Math.abs(dx) >= enter);
-                boolean yNeed = wasY ? (Math.abs(dy) > exit) : (Math.abs(dy) >= enter);
-                if (faceSource && faceBox != null && faceBox.top < 0.085f && !director) {
-                    yNeed = true;
-                    dy = Math.max(dy, 0.14f);
+                boolean xNeed;
+                boolean yNeed;
+                if (singleTarget) {
+                    xNeed = axisNeed(dx, Step3D.MOVE_LEFT, Step3D.MOVE_RIGHT, activeStep,
+                            strictLatch, PAN_ENTER, PAN_SWEET_EXIT, PAN_LATCH_ESCAPE);
+                    yNeed = axisNeed(dy, Step3D.MOVE_UP, Step3D.MOVE_DOWN, activeStep,
+                            strictLatch, PAN_ENTER, PAN_SWEET_EXIT, PAN_LATCH_ESCAPE);
+                } else {
+                    float minEdge = strictLatch ? 0.04f : 0.01f;
+                    xNeed = Math.abs(dx) > minEdge;
+                    yNeed = Math.abs(dy) > minEdge;
                 }
-                if (xNeed || yNeed) {
+
+                if (xNeed) signedErrX = clampRange(dx / 0.35f, -1f, 1f);
+                if (yNeed) signedErrY = clampRange(dy / 0.35f, -1f, 1f);
+
+                if (nextStep == Step3D.NONE && (xNeed || yNeed)) {
+                    boolean wasX = (activeStep == Step3D.MOVE_LEFT || activeStep == Step3D.MOVE_RIGHT);
+                    boolean wasY = (activeStep == Step3D.MOVE_UP || activeStep == Step3D.MOVE_DOWN);
                     float scoreX = xNeed ? Math.abs(dx) * (wasX ? 1.18f : 1f) : -1f;
                     float scoreY = yNeed ? Math.abs(dy) * (wasY ? 1.18f : 1f) : -1f;
                     if (scoreX >= scoreY) {
                         nextStep = dx >= 0f ? Step3D.MOVE_LEFT : Step3D.MOVE_RIGHT;
-                        strength = clamp01((Math.abs(dx) - 0.04f) / 0.24f);
+                        strength = clamp01((Math.abs(dx) - 0.06f) / 0.24f);
                     } else {
                         nextStep = dy >= 0f ? Step3D.MOVE_UP : Step3D.MOVE_DOWN;
-                        strength = clamp01((Math.abs(dy) - 0.04f) / 0.24f);
+                        strength = clamp01((Math.abs(dy) - 0.06f) / 0.24f);
                     }
                 }
             }
 
-            // Priority 3: True 3D camera pitch/elevation correction
-            if (nextStep == Step3D.NONE) {
-                Step3D pitchStep = evaluatePitchStep(faceSource, facingFront, directorTarget);
-                if (pitchStep != Step3D.NONE) {
+            // Priority 3: True 3D camera pitch/elevation correction with sign-aware latch
+            Step3D pitchStep = evaluatePitchStep(faceSource, facingFront, directorTarget, strictLatch);
+            if (pitchStep != Step3D.NONE) {
+                float targetElev = director
+                        ? directorTarget.targetElevationDeg
+                        : (smoothElevDeg >= 0f ? 2.0f : -14.0f);
+                float deltaElev = targetElev - smoothElevDeg;
+                float deltaBackTilt = facingFront ? deltaElev : -deltaElev;
+                signedErrPitch = clampRange(deltaBackTilt / 25.0f, -1f, 1f);
+                if (nextStep == Step3D.NONE) {
                     nextStep = pitchStep;
-                    float targetElev = director
-                            ? directorTarget.targetElevationDeg
-                            : (smoothElevDeg >= 0f ? 0f : -12f);
-                    strength = clamp01((Math.abs(targetElev - smoothElevDeg) - 5f) / 22f);
+                    strength = clamp01((Math.abs(deltaBackTilt) - 6f) / 22f);
                 }
             }
 
@@ -695,9 +1004,10 @@ public final class CompositionMath {
                     boolean hadRealGuidance = activeStep != Step3D.NONE
                             && activeStep != Step3D.LOCKED
                             && guidedSinceMs > 0L
-                            && (nowMs - guidedSinceMs) >= 280L;
+                            && (nowMs - guidedSinceMs) >= 240L;
                     if (hadRealGuidance && hasSmoothedPos) {
-                        lockedUntilMs = nowMs + 600L;
+                        lockedUntilMs = nowMs + NORMAL_LOCK_DISPLAY_MS;
+                        postLockGraceUntilMs = nowMs + NORMAL_POST_LOCK_GRACE_MS;
                         activeStep = Step3D.LOCKED;
                     } else if (activeStep == Step3D.LOCKED && nowMs < lockedUntilMs && hasSmoothedPos) {
                         activeStep = Step3D.LOCKED;
@@ -710,6 +1020,13 @@ public final class CompositionMath {
             }
 
             boolean locked = (activeStep == Step3D.LOCKED);
+            if (locked || activeStep == Step3D.NONE) {
+                signedErrX = 0f;
+                signedErrY = 0f;
+                signedErrZ = 0f;
+                signedErrPitch = 0f;
+            }
+
             float boxL = 0f, boxT = 0f, boxR = 0f, boxB = 0f;
             if (director) {
                 float halfH = Math.max(0.09f, directorTarget.targetSize * 0.58f);
@@ -726,41 +1043,57 @@ public final class CompositionMath {
                     activeStep, strength, director, locked,
                     hasSmoothedPos ? smoothX : Float.NaN,
                     hasSmoothedPos ? smoothY : Float.NaN,
-                    boxL, boxT, boxR, boxB);
+                    boxL, boxT, boxR, boxB,
+                    signedErrX, signedErrY, signedErrZ, signedErrPitch);
+        }
+
+        private static boolean axisNeed(
+                float delta, Step3D posStep, Step3D negStep, Step3D active,
+                boolean strictLatch, float enter, float sweetExit, float latchEscape) {
+            if (active == posStep) {
+                return delta > sweetExit || delta < -latchEscape;
+            }
+            if (active == negStep) {
+                return delta < -sweetExit || delta > latchEscape;
+            }
+            float threshold = strictLatch ? latchEscape : enter;
+            return Math.abs(delta) >= threshold;
         }
 
         private Step3D evaluateDepthStep(
-                boolean faceSource, ActiveBox faceBox, PreviewStats stats, DirectorTarget target) {
+                boolean faceSource, ActiveBox faceBox, PreviewStats stats,
+                DirectorTarget target, boolean strictLatch) {
             boolean wasCloser = (activeStep == Step3D.STEP_CLOSER);
             boolean wasBack = (activeStep == Step3D.STEP_BACK);
 
             if (target != null) {
                 if (faceSource && faceBox != null) {
-                    float tooCloseEnter = target.targetSize + 0.13f;
-                    float tooCloseExit = target.targetSize + 0.08f;
-                    float tooFarEnter = target.targetSize - 0.11f;
-                    float tooFarExit = target.targetSize - 0.06f;
+                    float enterPad = strictLatch ? 0.15f : 0.14f;
+                    float tooCloseEnter = target.targetSize + enterPad;
+                    float tooCloseExit = target.targetSize + 0.09f;
+                    float tooFarEnter = target.targetSize - enterPad;
+                    float tooFarExit = target.targetSize - 0.09f;
+                    if (wasBack) {
+                        return (smoothFaceH >= tooCloseExit || faceBox.clipped) ? Step3D.STEP_BACK : Step3D.NONE;
+                    }
+                    if (wasCloser) {
+                        return (smoothFaceH > 0f && smoothFaceH < tooFarExit) ? Step3D.STEP_CLOSER : Step3D.NONE;
+                    }
                     if (smoothFaceH >= tooCloseEnter
-                            || (faceBox.clipped && smoothFaceH > target.targetSize)) {
+                            || (faceBox.clipped && smoothFaceH > target.targetSize + 0.04f)) {
                         return Step3D.STEP_BACK;
                     }
                     if (smoothFaceH > 0f && smoothFaceH <= tooFarEnter) {
                         return Step3D.STEP_CLOSER;
                     }
-                    if (wasBack && (smoothFaceH >= tooCloseExit || faceBox.clipped)) {
-                        return Step3D.STEP_BACK;
-                    }
-                    if (wasCloser && smoothFaceH > 0f && smoothFaceH < tooFarExit) {
-                        return Step3D.STEP_CLOSER;
-                    }
                     return Step3D.NONE;
                 }
-                if (stats != null && stats.saliencyConfidence >= 0.24f) {
+                if (stats != null && stats.saliencyConfidence >= 0.35f) {
                     float estSize = clamp01(stats.saliencySpread * 1.45f);
-                    if (estSize <= target.targetSize - 0.12f && stats.borderEdgeRatio < 0.24f) {
+                    if (estSize <= target.targetSize - 0.13f && stats.borderEdgeRatio < 0.24f) {
                         return Step3D.STEP_CLOSER;
                     }
-                    if (wasCloser && estSize < target.targetSize - 0.07f) {
+                    if (wasCloser && estSize < target.targetSize - 0.08f) {
                         return Step3D.STEP_CLOSER;
                     }
                 }
@@ -768,49 +1101,41 @@ public final class CompositionMath {
             }
 
             if (faceSource && faceBox != null) {
-                boolean tooCloseEnter = smoothFaceH >= 0.46f || (smoothFaceH >= 0.31f && faceBox.clipped);
+                boolean tooCloseEnter = smoothFaceH >= 0.48f || (smoothFaceH >= 0.34f && faceBox.clipped);
                 boolean tooCloseExit = smoothFaceH < 0.40f && !faceBox.clipped;
                 boolean smallSpread = stats == null || stats.saliencySpread < 0.22f;
-                boolean tooFarEnter = smoothFaceH > 0f && smoothFaceH <= 0.115f && smallSpread;
-                boolean tooFarExit = smoothFaceH >= 0.145f || (stats != null && stats.saliencySpread >= 0.26f);
+                boolean tooFarEnter = smoothFaceH > 0f && smoothFaceH <= 0.11f && smallSpread;
+                boolean tooFarExit = smoothFaceH >= 0.15f || (stats != null && stats.saliencySpread >= 0.26f);
 
-                if (tooCloseEnter || (wasBack && !tooCloseExit)) return Step3D.STEP_BACK;
-                if (tooFarEnter || (wasCloser && !tooFarExit)) return Step3D.STEP_CLOSER;
-                return Step3D.NONE;
-            }
-
-            if (stats != null && stats.saliencyConfidence >= 0.30f) {
-                if (stats.saliencySpread < 0.145f && stats.borderEdgeRatio < 0.22f) {
-                    return Step3D.STEP_CLOSER;
-                }
-                if (wasCloser && stats.saliencySpread <= 0.180f) {
-                    return Step3D.STEP_CLOSER;
-                }
+                if (wasBack) return tooCloseExit ? Step3D.NONE : Step3D.STEP_BACK;
+                if (wasCloser) return tooFarExit ? Step3D.NONE : Step3D.STEP_CLOSER;
+                if (tooCloseEnter) return Step3D.STEP_BACK;
+                if (tooFarEnter) return Step3D.STEP_CLOSER;
             }
             return Step3D.NONE;
         }
 
-        private Step3D evaluatePitchStep(boolean faceSource, boolean facingFront, DirectorTarget target) {
-            boolean wasTilt = (activeStep == Step3D.TILT_TOP_AWAY || activeStep == Step3D.TILT_TOP_TOWARD);
+        private Step3D evaluatePitchStep(
+                boolean faceSource, boolean facingFront, DirectorTarget target, boolean strictLatch) {
             if (target != null) {
                 if (!target.checkElevation) return Step3D.NONE;
-                float diff = Math.abs(target.targetElevationDeg - smoothElevDeg);
-                float enterDeg = 9.0f;
-                float exitDeg = 5.0f;
-                if (diff >= enterDeg || (wasTilt && diff > exitDeg)) {
-                    return computeHandTiltStep(smoothElevDeg, target.targetElevationDeg, facingFront);
+                float deltaElev = target.targetElevationDeg - smoothElevDeg;
+                float deltaBackTilt = facingFront ? deltaElev : -deltaElev;
+                if (!axisNeed(deltaBackTilt, Step3D.TILT_TOP_AWAY, Step3D.TILT_TOP_TOWARD,
+                        activeStep, strictLatch, PITCH_ENTER_DEG, PITCH_SWEET_EXIT_DEG,
+                        PITCH_LATCH_ESCAPE_DEG)) {
+                    return Step3D.NONE;
                 }
-                return Step3D.NONE;
+                return deltaBackTilt >= 0f ? Step3D.TILT_TOP_AWAY : Step3D.TILT_TOP_TOWARD;
             }
 
-            // In normal mode, only intervene for harsh upward chin/nostril angles on portraits
-            // or accidental extreme downward tilts.
             if (faceSource) {
-                if (smoothElevDeg >= 16.0f || (wasTilt && smoothElevDeg > 10.0f)) {
-                    return computeHandTiltStep(smoothElevDeg, 0f, facingFront);
+                boolean wasTilt = (activeStep == Step3D.TILT_TOP_AWAY || activeStep == Step3D.TILT_TOP_TOWARD);
+                if (smoothElevDeg >= 18.0f || (wasTilt && smoothElevDeg > 10.0f)) {
+                    return computeHandTiltStep(smoothElevDeg, 2.0f, facingFront);
                 }
-                if (smoothElevDeg <= -32.0f || (wasTilt && smoothElevDeg < -24.0f)) {
-                    return computeHandTiltStep(smoothElevDeg, -12f, facingFront);
+                if (smoothElevDeg <= -34.0f || (wasTilt && smoothElevDeg < -24.0f)) {
+                    return computeHandTiltStep(smoothElevDeg, -14.0f, facingFront);
                 }
             }
             return Step3D.NONE;
@@ -818,16 +1143,14 @@ public final class CompositionMath {
 
         private float[] pickGridTarget(
                 float x, float y, boolean faceSource, GridMode mode, int goldenRotSteps) {
-            if (faceSource && mode == GridMode.CROSSHAIR) {
-                return new float[]{0.5f, 0.43f};
+            if (mode == GridMode.CROSSHAIR) {
+                return new float[]{0.5f, faceSource ? 0.42f : 0.50f};
             }
-            float[][] pts = (faceSource && mode == GridMode.THIRDS)
-                    ? new float[][]{{1f / 3f, 1f / 3f}, {2f / 3f, 1f / 3f}}
-                    : powerPoints(mode, goldenRotSteps);
-            float[] best = {0.5f, 0.5f};
-            float bestD = Float.MAX_VALUE;
+            float[][] pts = powerPoints(mode, goldenRotSteps);
+            float[] best = {0.5f, faceSource ? 0.42f : 0.45f};
+            float bestD = dist(x, y, best[0], best[1]);
             for (float[] p : pts) {
-                if (faceSource && mode == GridMode.GOLDEN_SPIRAL && p[1] > 0.65f) {
+                if (faceSource && p[1] > 0.65f) {
                     continue;
                 }
                 float d = dist(x, y, p[0], p[1]);
@@ -842,13 +1165,13 @@ public final class CompositionMath {
         private float balancedDeltaX(float x, boolean faceSource, ActiveBox box) {
             boolean wasLeft = (activeStep == Step3D.MOVE_LEFT);
             boolean wasRight = (activeStep == Step3D.MOVE_RIGHT);
-            boolean edgeL = faceSource && box != null && box.left < 0.045f;
-            boolean edgeR = faceSource && box != null && box.right > 0.955f;
-            if (x < 0.26f || edgeL || (wasLeft && x < 0.31f)) {
-                return Math.max(0.09f, 0.31f - x);
+            boolean edgeL = faceSource && box != null && box.left < 0.03f;
+            boolean edgeR = faceSource && box != null && box.right > 0.97f;
+            if (x < 0.22f || edgeL || (wasLeft && x < 0.30f)) {
+                return Math.max(0.14f, 0.34f - x);
             }
-            if (x > 0.74f || edgeR || (wasRight && x > 0.69f)) {
-                return -Math.max(0.09f, x - 0.69f);
+            if (x > 0.78f || edgeR || (wasRight && x > 0.70f)) {
+                return -Math.max(0.14f, x - 0.66f);
             }
             return 0f;
         }
@@ -857,19 +1180,19 @@ public final class CompositionMath {
             boolean wasUp = (activeStep == Step3D.MOVE_UP);
             boolean wasDown = (activeStep == Step3D.MOVE_DOWN);
             if (faceSource && box != null) {
-                if (box.top < 0.085f || y < 0.20f || (wasUp && (box.top < 0.115f || y < 0.24f))) {
-                    return Math.max(0.09f, Math.max(0.24f - y, (0.115f - box.top) * 2f));
+                if (box.top < 0.065f || y < 0.20f || (wasUp && (box.top < 0.095f || y < 0.25f))) {
+                    return Math.max(0.14f, Math.max(0.30f - y, (0.095f - box.top) * 2f));
                 }
-                if (y > 0.62f || (wasDown && y > 0.56f)) {
-                    return -Math.max(0.09f, y - 0.56f);
+                if (y > 0.58f || (wasDown && y > 0.52f)) {
+                    return -Math.max(0.14f, y - 0.48f);
                 }
                 return 0f;
             }
-            if (y < 0.22f || (wasUp && y < 0.27f)) {
-                return Math.max(0.09f, 0.27f - y);
+            if (y < 0.20f || (wasUp && y < 0.26f)) {
+                return Math.max(0.14f, 0.32f - y);
             }
-            if (y > 0.75f || (wasDown && y > 0.70f)) {
-                return -Math.max(0.09f, y - 0.70f);
+            if (y > 0.76f || (wasDown && y > 0.70f)) {
+                return -Math.max(0.14f, y - 0.64f);
             }
             return 0f;
         }

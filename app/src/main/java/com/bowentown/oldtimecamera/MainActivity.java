@@ -178,6 +178,7 @@ public class MainActivity extends ComponentActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final CompositionMath.SnapState snapState = new CompositionMath.SnapState();
     private final CompositionMath.MoveGuideState moveGuideState = new CompositionMath.MoveGuideState();
+    private final CompositionMath.SubjectPatchTracker patchTracker = new CompositionMath.SubjectPatchTracker();
     private final ExposureAdvisor exposureAdvisor = new ExposureAdvisor();
     private final StabilityMeter stabilityMeter = new StabilityMeter();
     private Sensor gyroSensor;
@@ -194,6 +195,8 @@ public class MainActivity extends ComponentActivity {
     private volatile CompositionMath.Guide3DCue latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
     private float lastTapSubjectX = Float.NaN, lastTapSubjectY = Float.NaN;
     private long lastTapSubjectMs = 0L;
+    private float pendingTapX = Float.NaN, pendingTapY = Float.NaN;
+    private long pendingTapMs = 0L;
     private final RectF latestFrameRect = new RectF();
     private float lastStatsSubjectX = Float.NaN, lastStatsSubjectY = Float.NaN;
     private long lastStatsSubjectMs = 0L;
@@ -250,7 +253,7 @@ public class MainActivity extends ComponentActivity {
                     smoothGravityX, smoothGravityY, smoothGravityZ, facingFront);
             if (needPitch) {
                 long now = SystemClock.uptimeMillis();
-                if (now - lastPitchUiTickMs >= 95L) {
+                if (now - lastPitchUiTickMs >= 45L) {
                     lastPitchUiTickMs = now;
                     mainHandler.post(faceMoveTickTask);
                 }
@@ -895,7 +898,7 @@ public class MainActivity extends ComponentActivity {
                 previewView.getSensorAspectRatio(), targetRatio);
         latestFrameScaleX = scales[0];
         latestFrameScaleY = scales[1];
-        lastTapSubjectMs = 0L;
+        resetTrackedSubject();
         lastFaceBox = null;
         lastFaceActiveMs = 0L;
         moveGuideState.reset();
@@ -1030,6 +1033,13 @@ public class MainActivity extends ComponentActivity {
         latestStats = stats;
 
         long now = SystemClock.uptimeMillis();
+        if (pendingTapMs > 0L && (now - pendingTapMs) <= 300L) {
+            patchTracker.lock(stats, pendingTapX, pendingTapY, now);
+            pendingTapMs = 0L;
+        } else if (patchTracker.isActive()) {
+            patchTracker.update(stats, now);
+        }
+
         lastStatsSubjectX = stats.saliencyConfidence >= 0.22f ? stats.saliencyX : Float.NaN;
         lastStatsSubjectY = stats.saliencyConfidence >= 0.22f ? stats.saliencyY : Float.NaN;
         lastStatsSubjectMs = stats.saliencyConfidence >= 0.22f ? now : 0L;
@@ -1059,6 +1069,9 @@ public class MainActivity extends ComponentActivity {
             if (freshFace) {
                 subX = lastFaceActiveX;
                 subY = lastFaceActiveY;
+            } else if (patchTracker.isActive()) {
+                subX = patchTracker.getX();
+                subY = patchTracker.getY();
             } else if ((now - lastTapSubjectMs) <= TAP_SUBJECT_TTL_MS && !Float.isNaN(lastTapSubjectX)) {
                 subX = lastTapSubjectX;
                 subY = lastTapSubjectY;
@@ -1084,6 +1097,12 @@ public class MainActivity extends ComponentActivity {
 
         refreshAssistHint();
         refreshMoveGuide();
+    }
+
+    private void resetTrackedSubject() {
+        lastTapSubjectMs = 0L;
+        pendingTapMs = 0L;
+        patchTracker.reset();
     }
 
     private void refreshMoveGuide() {
@@ -1112,14 +1131,17 @@ public class MainActivity extends ComponentActivity {
         long now = SystemClock.uptimeMillis();
         CompositionMath.ActiveBox faceSnapshot = lastFaceBox;
         boolean freshFace = faceSnapshot != null && (now - lastFaceActiveMs) <= FACE_STALE_MS;
-        boolean hasTap = (now - lastTapSubjectMs) <= TAP_SUBJECT_TTL_MS && !Float.isNaN(lastTapSubjectX);
+        boolean pendingTapValid = pendingTapMs > 0L && (now - pendingTapMs) <= 300L && !Float.isNaN(pendingTapX);
+        boolean hasTracked = patchTracker.isActive() || pendingTapValid;
+        float trackedX = patchTracker.isActive() ? patchTracker.getX() : pendingTapX;
+        float trackedY = patchTracker.isActive() ? patchTracker.getY() : pendingTapY;
         AiCoachMath.AiDirectorPlan plan = activeDirectorPlan;
         CompositionMath.DirectorTarget directorTarget = plan != null ? plan.target : null;
         CompositionMath.Guide3DCue previous = latestGuideCue;
 
         CompositionMath.Guide3DCue cue = moveGuideState.evaluate(
                 freshFace, faceSnapshot,
-                hasTap, lastTapSubjectX, lastTapSubjectY,
+                hasTracked, trackedX, trackedY,
                 latestStats, gridMode, goldenRotation,
                 latestCameraElevationDeg, facingFront, directorTarget, now);
         latestGuideCue = cue;
@@ -1315,6 +1337,11 @@ public class MainActivity extends ComponentActivity {
                     aiCoachButton.setAlpha(1f);
                     applyDirectorSettings(finalPlan);
                     moveGuideState.reset();
+                    if (!Float.isNaN(finalPlan.subjectX) && !Float.isNaN(finalPlan.subjectY)
+                            && latestStats != null) {
+                        patchTracker.lock(latestStats, finalPlan.subjectX, finalPlan.subjectY,
+                                SystemClock.uptimeMillis());
+                    }
                     syncAssistSensorsAndTelemetry();
                     shutterButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 } else {
@@ -1334,6 +1361,7 @@ public class MainActivity extends ComponentActivity {
         activeDirectorPlan = null;
         lastLockedState = false;
         moveGuideState.reset();
+        resetTrackedSubject();
         if (shutterProgress != null) {
             shutterProgress.setReadyLocked(false);
         }
@@ -1532,7 +1560,7 @@ public class MainActivity extends ComponentActivity {
         lastFaceActiveX = Float.NaN;
         lastFaceActiveY = Float.NaN;
         lastFaceBox = null;
-        lastTapSubjectMs = 0L;
+        resetTrackedSubject();
         moveGuideState.reset();
         snapState.reset();
         viewfinderOverlay.setPowerPointHighlight(-1);
@@ -1658,7 +1686,7 @@ public class MainActivity extends ComponentActivity {
         else if (manualRotation == 180) manualRotation = 270;
         else manualRotation = -1;
         prefs.setManualRotation(manualRotation);
-        lastTapSubjectMs = 0L;
+        resetTrackedSubject();
         lastFaceActiveMs = 0L;
         lastFaceBox = null;
         moveGuideState.reset();
@@ -1694,9 +1722,18 @@ public class MainActivity extends ComponentActivity {
                 latestFrameRect.left, latestFrameRect.top,
                 latestFrameRect.width(), latestFrameRect.height());
         if (norm != null) {
+            long now = SystemClock.uptimeMillis();
             lastTapSubjectX = norm[0];
             lastTapSubjectY = norm[1];
-            lastTapSubjectMs = SystemClock.uptimeMillis();
+            lastTapSubjectMs = now;
+            if (latestStats != null && patchTracker.lock(latestStats, norm[0], norm[1], now)) {
+                pendingTapMs = 0L;
+            } else {
+                pendingTapX = norm[0];
+                pendingTapY = norm[1];
+                pendingTapMs = now;
+            }
+            refreshMoveGuide();
         }
         viewfinderOverlay.showFocusAt(viewX, viewY);
         viewfinderOverlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
@@ -2013,7 +2050,7 @@ public class MainActivity extends ComponentActivity {
         lastFaceActiveY = activeBox.centerY();
         long now = SystemClock.uptimeMillis();
         lastFaceActiveMs = now;
-        if (assistMoveGuide && now - lastFaceUiTickMs >= 95L) {
+        if ((assistMoveGuide || activeDirectorPlan != null) && now - lastFaceUiTickMs >= 45L) {
             lastFaceUiTickMs = now;
             mainHandler.removeCallbacks(faceMoveTickTask);
             mainHandler.post(faceMoveTickTask);
@@ -2455,6 +2492,9 @@ public class MainActivity extends ComponentActivity {
         advanceRollAndThumbnail(savedUri, thumb);
         if (activeDirectorPlan != null) {
             clearDirectorPlan();
+        } else {
+            resetTrackedSubject();
+            refreshMoveGuide();
         }
         // Advance the organic leak seed for the next exposure so consecutive
         // shots on the roll get subtle edge variation while staying WYSIWYG.
@@ -2612,6 +2652,7 @@ public class MainActivity extends ComponentActivity {
         lastFaceBox = null;
         lastFaceActiveMs = 0L;
         moveGuideState.reset();
+        resetTrackedSubject();
         latestGuideCue = CompositionMath.Guide3DCue.EMPTY;
         lastLockedState = false;
         if (shutterProgress != null) {

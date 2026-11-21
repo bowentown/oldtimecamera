@@ -247,9 +247,9 @@ public class CompositionMathTest {
                 null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
         assertEquals(CompositionMath.Step3D.MOVE_LEFT, leftCue.step);
 
-        // 3. Hysteresis: moving slightly back inside [0.26 .. 0.31] stays MOVE_LEFT without jitter
+        // 3. Hysteresis: moving slightly back inside [0.22 .. 0.30] stays MOVE_LEFT without jitter
         CompositionMath.ActiveBox edgeBand =
-                new CompositionMath.ActiveBox(0.18f, 0.22f, 0.38f, 0.48f, 0.20f, 0.26f, false);
+                new CompositionMath.ActiveBox(0.16f, 0.22f, 0.36f, 0.48f, 0.20f, 0.26f, false);
         assertEquals(CompositionMath.Step3D.MOVE_LEFT,
                 state.evaluate(true, edgeBand, false, Float.NaN, Float.NaN,
                         null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t + 150L).step);
@@ -279,28 +279,35 @@ public class CompositionMathTest {
                 null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
         assertEquals(CompositionMath.Step3D.STEP_BACK, backCue.step);
 
-        // 7. Tiny isolated subject (high saliency confidence + compact spread) -> STEP_CLOSER
+        // 7. Explicit-subject-only rule: strong off-center global saliency without face/tap returns EMPTY
         state.reset();
-        PreviewStats smallSubject = new PreviewStats(
+        PreviewStats strongOffCenter = new PreviewStats(
                 32, 24, 0.45f, 0.01f, 0.05f, 0.45f, 0.45f,
                 0.45f, 0.45f, 0.45f, 0.2f,
-                0.5f, 0.5f, 0.55f, null, 0.09f, 0.02f);
-        CompositionMath.Guide3DCue closerCue = state.evaluate(
+                0.15f, 0.5f, 0.75f, null, 0.09f, 0.02f);
+        assertTrue(state.evaluate(
                 false, null, false, Float.NaN, Float.NaN,
-                smallSubject, CompositionMath.GridMode.OFF, 0, 0f, false, null, t);
-        assertEquals(CompositionMath.Step3D.STEP_CLOSER, closerCue.step);
+                strongOffCenter, CompositionMath.GridMode.OFF, 0, 0f, false, null, t).isEmpty());
 
-        // 8. Normal confirmation: guiding >= 280ms then converging to centered frame -> LOCKED -> auto-hide
+        // Very small face -> STEP_CLOSER depth cue
+        state.reset();
+        CompositionMath.ActiveBox smallFaceBox =
+                new CompositionMath.ActiveBox(0.45f, 0.32f, 0.55f, 0.42f, 0.10f, 0.10f, false);
+        assertEquals(CompositionMath.Step3D.STEP_CLOSER,
+                state.evaluate(true, smallFaceBox, false, Float.NaN, Float.NaN,
+                        null, CompositionMath.GridMode.OFF, 0, 0f, false, null, t).step);
+
+        // 8. Normal confirmation: guiding >= 240ms then reaching centered frame -> LOCKED -> auto-hide
         state.reset();
         state.evaluate(true, farLeft, false, Float.NaN, Float.NaN,
                 null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_000L);
         state.evaluate(true, farLeft, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_320L);
+                null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_280L);
         CompositionMath.Guide3DCue confirmCue = CompositionMath.Guide3DCue.EMPTY;
-        for (int i = 1; i <= 6; i++) {
+        for (int i = 1; i <= 3; i++) {
             confirmCue = state.evaluate(
                     true, centeredPortrait, false, Float.NaN, Float.NaN,
-                    null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_320L + i * 60L);
+                    null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 1_280L + i * 50L);
         }
         assertEquals(CompositionMath.Step3D.LOCKED, confirmCue.step);
         CompositionMath.Guide3DCue fadedCue = state.evaluate(
@@ -308,14 +315,137 @@ public class CompositionMathTest {
                 null, CompositionMath.GridMode.OFF, 0, 0f, false, null, 2_500L);
         assertEquals(CompositionMath.Step3D.NONE, fadedCue.step);
 
-        // 9. Portrait with THIRDS grid prefers upper power point (y=1/3) -> MOVE_DOWN when low
+        // 9. Portrait below vertical comfort zone (> 0.58) -> MOVE_DOWN
         state.reset();
         CompositionMath.ActiveBox lowPortrait =
-                new CompositionMath.ActiveBox(0.24f, 0.46f, 0.42f, 0.68f, 0.18f, 0.22f, false);
-        CompositionMath.Guide3DCue thirdsPortrait = state.evaluate(
-                true, lowPortrait, false, Float.NaN, Float.NaN,
-                null, CompositionMath.GridMode.THIRDS, 0, 0f, false, null, t);
-        assertEquals(CompositionMath.Step3D.MOVE_DOWN, thirdsPortrait.step);
+                new CompositionMath.ActiveBox(0.24f, 0.58f, 0.42f, 0.80f, 0.18f, 0.22f, false);
+        assertEquals(CompositionMath.Step3D.MOVE_DOWN,
+                state.evaluate(true, lowPortrait, false, Float.NaN, Float.NaN,
+                        null, CompositionMath.GridMode.THIRDS, 0, 0f, false, null, t).step);
+    }
+
+    @Test
+    public void moveGuideState_zeroCrossingLatchPreventsLeftRightFlip() {
+        CompositionMath.MoveGuideState state = new CompositionMath.MoveGuideState();
+        CompositionMath.DirectorTarget target =
+                new CompositionMath.DirectorTarget(0.50f, 0.36f, 0.25f, -8f, true);
+        long t = 2_000L;
+
+        // Start left of target (x=0.25, dx=+0.25) -> MOVE_LEFT
+        CompositionMath.ActiveBox leftFace =
+                new CompositionMath.ActiveBox(0.17f, 0.25f, 0.33f, 0.50f, 0.16f, 0.25f, false);
+        assertEquals(CompositionMath.Step3D.MOVE_LEFT, state.evaluate(
+                true, leftFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, -8f, false, target, t).step);
+
+        // User moves phone left and overshoots +15% past target to x=0.65 (dx=-0.15, within 18% latch).
+        // Must latch to LOCKED directly and NEVER flip to MOVE_RIGHT!
+        CompositionMath.ActiveBox overshotFace =
+                new CompositionMath.ActiveBox(0.57f, 0.25f, 0.73f, 0.50f, 0.16f, 0.25f, false);
+        CompositionMath.Guide3DCue cue = CompositionMath.Guide3DCue.EMPTY;
+        for (int i = 1; i <= 5; i++) {
+            cue = state.evaluate(true, overshotFace, false, Float.NaN, Float.NaN,
+                    null, CompositionMath.GridMode.OFF, 0, -8f, false, target, t + i * 50L);
+            assertTrue("Overshoot within latch must never flip to MOVE_RIGHT: " + cue.step,
+                    cue.step != CompositionMath.Step3D.MOVE_RIGHT);
+        }
+        assertEquals(CompositionMath.Step3D.LOCKED, cue.step);
+
+        // Verify next tick remains LOCKED without bouncing
+        assertEquals(CompositionMath.Step3D.LOCKED, state.evaluate(
+                true, overshotFace, false, Float.NaN, Float.NaN,
+                null, CompositionMath.GridMode.OFF, 0, -8f, false, target, t + 350L).step);
+    }
+
+    @Test
+    public void moveGuideState_multiAnchorComfortBandEliminatesCenterRidge() {
+        CompositionMath.MoveGuideState state = new CompositionMath.MoveGuideState();
+        CompositionMath.GridMode[] modes = {CompositionMath.GridMode.OFF, CompositionMath.GridMode.THIRDS};
+        float[] validXs = {0.33f, 0.49f, 0.50f, 0.51f, 0.67f};
+        for (CompositionMath.GridMode m : modes) {
+            for (float cx : validXs) {
+                state.reset();
+                CompositionMath.ActiveBox box = new CompositionMath.ActiveBox(
+                        cx - 0.10f, 0.25f, cx + 0.10f, 0.50f, 0.20f, 0.25f, false);
+                CompositionMath.Guide3DCue cue = state.evaluate(
+                        true, box, false, Float.NaN, Float.NaN,
+                        null, m, 0, 0f, false, null, 3_000L);
+                assertEquals("Unexpected cue at x=" + cx + " in mode=" + m,
+                        CompositionMath.Step3D.NONE, cue.step);
+            }
+        }
+    }
+
+    @Test
+    public void subjectPatchTracker_tracksShiftingObjectAndDropsUnrelatedScene() {
+        int w = 32, h = 24;
+        byte[] frame1 = new byte[w * h * 3];
+        byte[] frame2 = new byte[w * h * 3];
+        byte[] unrelated = new byte[w * h * 3];
+        // Paint crisp checkerboard background gradients + bright textured 5x5 object at (10, 11) in frame1 and (14, 12) in frame2
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int i = (y * w + x) * 3;
+                frame1[i] = 25; frame1[i + 1] = 25; frame1[i + 2] = 30;
+                frame2[i] = 25; frame2[i + 1] = 25; frame2[i + 2] = 30;
+                unrelated[i] = (byte) 200; unrelated[i + 1] = (byte) 200; unrelated[i + 2] = (byte) 200;
+            }
+        }
+        paintTestPatch(frame1, w, h, 10, 11);
+        paintTestPatch(frame2, w, h, 14, 12);
+
+        PreviewStats base = new PreviewStats(w, h, 0.4f, 0f, 0f, 0.4f, 0.4f,
+                0.4f, 0.4f, 0.4f, 0.2f, 0.5f, 0.5f, 0.5f);
+        PreviewStats s1 = base.withThumbRgb(frame1);
+        PreviewStats s2 = base.withThumbRgb(frame2);
+        PreviewStats s3 = base.withThumbRgb(unrelated);
+
+        CompositionMath.SubjectPatchTracker tracker = new CompositionMath.SubjectPatchTracker();
+        assertTrue(tracker.lock(s1, (10.5f) / w, (11.5f) / h, 1_000L));
+        assertTrue(tracker.update(s2, 1_100L));
+        assertEquals((14.5f) / w, tracker.getX(), 0.04f);
+        assertEquals((12.5f) / h, tracker.getY(), 0.05f);
+
+        // Replaced by flat unrelated frame -> drops cleanly within 3 updates
+        tracker.update(s3, 1_200L);
+        tracker.update(s3, 1_300L);
+        assertFalse(tracker.update(s3, 1_400L));
+        assertFalse(tracker.isActive());
+    }
+
+    private static void paintTestPatch(byte[] rgb, int w, int h, int cx, int cy) {
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                int x = cx + dx, y = cy + dy;
+                if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                int i = (y * w + x) * 3;
+                boolean core = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+                rgb[i] = (byte) (core ? 245 : 150);
+                rgb[i + 1] = (byte) (core ? 175 : 90);
+                rgb[i + 2] = (byte) (core ? 80 : 40);
+            }
+        }
+    }
+
+    @Test
+    public void coincidencePose_shrinksMonotonicallyTowardTarget() {
+        CompositionMath.Guide3DCue farLeft = new CompositionMath.Guide3DCue(
+                CompositionMath.Step3D.MOVE_LEFT, 1f, false, false,
+                0.15f, 0.45f, 0f, 0f, 0f, 0f, 1.0f, 0f, 0f, 0f);
+        CompositionMath.Guide3DCue midLeft = new CompositionMath.Guide3DCue(
+                CompositionMath.Step3D.MOVE_LEFT, 0.5f, false, false,
+                0.32f, 0.45f, 0f, 0f, 0f, 0f, 0.5f, 0f, 0f, 0f);
+        CompositionMath.Guide3DCue locked = new CompositionMath.Guide3DCue(
+                CompositionMath.Step3D.LOCKED, 0f, false, true,
+                0.50f, 0.45f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+
+        CompositionMath.Pose3D pFar = CompositionMath.poseForLiveCue(farLeft, 0f);
+        CompositionMath.Pose3D pMid = CompositionMath.poseForLiveCue(midLeft, 0f);
+        CompositionMath.Pose3D pZero = CompositionMath.poseForLiveCue(locked, 0f);
+        assertTrue(Math.abs(pFar.tx) > Math.abs(pMid.tx));
+        assertTrue(Math.abs(pMid.tx) > Math.abs(pZero.tx));
+        assertEquals(CompositionMath.TARGET_POSE.tx, pZero.tx, 1e-4f);
+        assertEquals(CompositionMath.TARGET_POSE.pitchDeg, pZero.pitchDeg, 1e-4f);
     }
 
     @Test

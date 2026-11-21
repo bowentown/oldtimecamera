@@ -101,15 +101,28 @@ public final class AiCoachMath {
         public final CompositionMath.DirectorTarget target;
         public final String recommendedPresetId;
         public final float evDelta;
+        public final float subjectX;
+        public final float subjectY;
 
         public AiDirectorPlan(String instruction, String poseTip,
                               CompositionMath.DirectorTarget target,
                               String recommendedPresetId, float evDelta) {
+            this(instruction, poseTip, target, recommendedPresetId, evDelta, Float.NaN, Float.NaN);
+        }
+
+        public AiDirectorPlan(String instruction, String poseTip,
+                              CompositionMath.DirectorTarget target,
+                              String recommendedPresetId, float evDelta,
+                              float subjectX, float subjectY) {
             this.instruction = cleanText(instruction, 48);
             this.poseTip = cleanText(poseTip, 26);
             this.target = target;
             this.recommendedPresetId = resolveOptionalPresetId(recommendedPresetId);
             this.evDelta = clampEv(evDelta);
+            this.subjectX = (Float.isNaN(subjectX) || Float.isNaN(subjectY))
+                    ? Float.NaN : Math.max(0.05f, Math.min(0.95f, subjectX));
+            this.subjectY = (Float.isNaN(subjectX) || Float.isNaN(subjectY))
+                    ? Float.NaN : Math.max(0.05f, Math.min(0.95f, subjectY));
         }
 
         public boolean isEmpty() {
@@ -270,9 +283,10 @@ public final class AiCoachMath {
             return "你是站在摄影小白身旁的实景领拍教练。看当前取景图，直接告诉他下一步去哪里拍、怎么拿手机，禁用「二分法/三分法/对比度/氛围感」等空洞摄影术语。"
                     + "\n必须只输出严格 JSON（不要 markdown 代码块）："
                     + "\n{\"instruction\":\"1句<=30字大白话：往哪挪避开什么背景或迎哪束光\",\"poseTip\":\"可选<=16字姿态眼神提示，无人像填空串\","
-                    + "\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
+                    + "\"subjectX\":0.50,\"subjectY\":0.48,\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
                     + "\"recommendedPresetId\":\"更搭的胶片ID，不变填空串\",\"evDelta\":0.0}"
                     + "\n参数说明："
+                    + "\n- subjectX,subjectY∈[0.05,0.95]: 当前画面主角所在归一化坐标(可选，非人像静物/食物/风景务必标出);"
                     + "\n- targetX∈[0.25,0.75]: 主体在画面横向目标位置(0.5居中, 0.35/0.65避杂物);"
                     + "\n- targetY∈[0.25,0.65]: 主体/人眼纵向目标位置(人像推荐0.35~0.40);"
                     + "\n- targetSize∈[0.16,0.44]: 主体占画面高度比(日常半身约0.24~0.28, 太近要退就设0.22);"
@@ -282,9 +296,9 @@ public final class AiCoachMath {
         return "You are a hands-on shooting director standing next to a camera beginner. Look at the live frame and tell them in plain physical language what background distraction or lighting to fix—no photography jargon."
                 + "\nOutput ONLY raw JSON:"
                 + "\n{\"instruction\":\"<=18 words plain physical action (step direction / light direction)\",\"poseTip\":\"optional <=8 words pose cue or empty\","
-                + "\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
+                + "\"subjectX\":0.50,\"subjectY\":0.48,\"targetX\":0.50,\"targetY\":0.36,\"targetSize\":0.26,\"targetElevationDeg\":-6.0,"
                 + "\"recommendedPresetId\":\"better stock ID or empty\",\"evDelta\":0.0}"
-                + "\nRanges: targetX[0.25..0.75], targetY[0.25..0.65], targetSize[0.16..0.44], targetElevationDeg[-25..+15] (negative=tilt down/higher phone), evDelta[-1.5..+1.5]. Stock IDs: "
+                + "\nRanges: subjectX,subjectY[0.05..0.95] (current main object coords when non-portrait), targetX[0.25..0.75], targetY[0.25..0.65], targetSize[0.16..0.44], targetElevationDeg[-25..+15] (negative=tilt down/higher phone), evDelta[-1.5..+1.5]. Stock IDs: "
                 + stockCatalogText();
     }
 
@@ -392,6 +406,8 @@ public final class AiCoachMath {
             String pose = firstNonEmpty(map, "poseTip", "pose", "look");
             float tx = parseClampedFloat(firstNonEmpty(map, "targetX", "x"), defX, 0.15f, 0.85f);
             float ty = parseClampedFloat(firstNonEmpty(map, "targetY", "y"), defY, 0.15f, 0.85f);
+            float sx = parseClampedFloat(firstNonEmpty(map, "subjectX", "anchorX"), Float.NaN, 0.05f, 0.95f);
+            float sy = parseClampedFloat(firstNonEmpty(map, "subjectY", "anchorY"), Float.NaN, 0.05f, 0.95f);
             float tsize = parseClampedFloat(firstNonEmpty(map, "targetSize", "size"), defSize, 0.12f, 0.58f);
             float telev = parseClampedFloat(
                     firstNonEmpty(map, "targetElevationDeg", "elevationDeg", "pitchDeg", "targetPitch"),
@@ -406,7 +422,7 @@ public final class AiCoachMath {
                 return new AiDirectorPlan(
                         inst, pose,
                         new CompositionMath.DirectorTarget(tx, ty, tsize, telev, true),
-                        preset, ev);
+                        preset, ev, sx, sy);
             }
         }
 
