@@ -1,7 +1,7 @@
 # 旧时光相机 · Old Time Camera
 
-一个克制、优雅的 Android 纯本地胶片相机（`v2.0.0`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
-实时预览与全分辨率成片共用同一套 **OpenGL ES 2.0 + 3D HaldCLUT 色彩引擎**与塑料一次性镜头光学物理模拟，拍摄或批量导入洗印后叠上相纸边框（含纪实参数铭牌框与 35mm 齿孔框）、编号与复古橙色日期背印，写入系统相册并保留相机拍摄 EXIF 元数据；同时内置滚动 36 格无损底片保险库，随时可在灯箱内无损换卷重洗。
+一个克制、优雅的 Android 纯本地胶片相机（`v2.0.1`）：**一块无遮挡光学取景窗、十卷胶片、一颗机械快门**。
+实时预览与全分辨率成片共用同一套 **OpenGL ES 2.0 + 3D HaldCLUT 色彩引擎**与塑料一次性镜头光学物理模拟，拍摄或批量导入洗印后叠上相纸边框（含纪实参数铭牌框与 35mm 齿孔框）、编号与 `yyyy/MM/dd HH:mm` 冲印时间水印，写入系统相册并保留相机拍摄 EXIF 元数据；同时内置滚动 36 格无损底片保险库，随时可在灯箱内无损换卷或按当前冲印时间重洗。
 
 默认全离线运行、无账号、无统计/广告 SDK。网络访问**仅在用户主动点击**时发生：暗房面板里的「检查更新」（GitHub Releases API）与可选的 **BYOK AI 摄影导师**（支持自带 DeepSeek `deepseek-flash` / 通义千问 VL / OpenAI / 自定义兼容接口 API Key，经 `AndroidKeyStore` 加密保存在本机，绝不后台扫描或偷跑流量）。
 
@@ -90,7 +90,7 @@
 需要 JDK 17、Android SDK（platform 36 + build-tools 36.0.0），并配置 `ANDROID_HOME` / `local.properties`：
 
 ```bash
-./gradlew testDebugUnitTest  # 运行 10 个 JVM 单元测试类（65 项测试）
+./gradlew testDebugUnitTest  # 运行 10 个 JVM 单元测试类（66 项测试）
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 需 keystore.properties，否则产出 unsigned 包
 ```
@@ -146,7 +146,7 @@ app/src/main/java/com/bowentown/oldtimecamera/
 ├── UpdateChecker.java          GitHub Releases 检查更新与证书校验安装
 └── VersionMath.java            语义化版本比较（纯 Java）
 app/src/main/assets/licenses/   MIT、OFL、NOTICE 全文（随 APK 分发）
-app/src/test/java/com/bowentown/oldtimecamera/   10 个纯 JVM 测试类（65 项测试）
+app/src/test/java/com/bowentown/oldtimecamera/   10 个纯 JVM 测试类（66 项测试）
 LICENSES/                       仓库侧第三方许可全文
 NOTICE                          专有声明 + 第三方资产例外 + 商标说明
 docs/                           OFL 原文与开源项目调研

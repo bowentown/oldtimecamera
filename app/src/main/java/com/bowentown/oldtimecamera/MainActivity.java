@@ -301,6 +301,14 @@ public final class MainActivity extends ComponentActivity {
         }
     };
 
+    private final Runnable stampClockTickTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!isActivityResumed || isDestroyed() || isFinishing()) return;
+            updateStampPreview();
+        }
+    };
+
     private final Runnable steadyTickTask = new Runnable() {
         @Override
         public void run() {
@@ -961,12 +969,17 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void updateStampPreview() {
+        mainHandler.removeCallbacks(stampClockTickTask);
         String text = PhotoSaver.dateString(dateMode);
         if (text.isEmpty()) {
             dateStampPreview.setVisibility(View.GONE);
         } else {
             dateStampPreview.setText(text);
             dateStampPreview.setVisibility(View.VISIBLE);
+            if (isActivityResumed) {
+                long delayMs = 60_000L - (System.currentTimeMillis() % 60_000L) + 150L;
+                mainHandler.postDelayed(stampClockTickTask, delayMs);
+            }
         }
     }
 
@@ -2761,6 +2774,7 @@ public final class MainActivity extends ComponentActivity {
         }
         syncLevelSensorRegistration();
         syncAssistSensorsAndTelemetry();
+        updateStampPreview();
         refreshThumbnailAsync();
     }
 
@@ -2779,6 +2793,7 @@ public final class MainActivity extends ComponentActivity {
         mainHandler.removeCallbacks(clearTransientHintTask);
         mainHandler.removeCallbacks(autoFadeExposureTask);
         mainHandler.removeCallbacks(faceMoveTickTask);
+        mainHandler.removeCallbacks(stampClockTickTask);
         lastFaceBox = null;
         lastFaceActiveMs = 0L;
         moveGuideState.reset();

@@ -53,12 +53,20 @@ public final class PhotoSaver {
     private PhotoSaver() {}
 
     public static String dateString(CameraPrefs.DateMode mode) {
-        if (mode == CameraPrefs.DateMode.OFF) return "";
-        Date now = new Date();
+        return dateString(mode, new Date());
+    }
+
+    /**
+     * Pure-Java developing-time watermark formatter ({@code yyyy/MM/dd HH:mm}, or
+     * {@code 1998/MM/dd HH:mm} for {@link CameraPrefs.DateMode#RETRO_98}).
+     */
+    public static String dateString(CameraPrefs.DateMode mode, Date timestamp) {
+        if (mode == null || mode == CameraPrefs.DateMode.OFF) return "";
+        Date when = timestamp != null ? timestamp : new Date();
         if (mode == CameraPrefs.DateMode.RETRO_98) {
-            return "98 " + new SimpleDateFormat("MM dd", Locale.US).format(now);
+            return "1998/" + new SimpleDateFormat("MM/dd HH:mm", Locale.US).format(when);
         }
-        return new SimpleDateFormat("yy MM dd", Locale.US).format(now);
+        return new SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(when);
     }
 
     /**
@@ -354,9 +362,11 @@ public final class PhotoSaver {
         if (hasStamp) {
             paint.setTextAlign(Paint.Align.RIGHT);
             paint.setColor(0xFFF2A65A);
-            paint.setTextSize(shortSide * 0.040f);
-            paint.setShadowLayer(shortSide * 0.006f, 0f, 0f, 0x80000000);
-            canvas.drawText(stampText, pad + w * 0.952f, pad + h - h * 0.038f, paint);
+            paint.setTextSize(shortSide * 0.0285f);
+            paint.setShadowLayer(shortSide * 0.0045f, 0f, shortSide * 0.0014f, 0x99000000);
+            float marginRight = shortSide * 0.042f;
+            float marginBottom = shortSide * 0.034f;
+            canvas.drawText(stampText, pad + w - marginRight, pad + h - marginBottom, paint);
             paint.clearShadowLayer();
         }
 
@@ -469,8 +479,7 @@ public final class PhotoSaver {
         if (frameNumber > 0) {
             subLeft.append(String.format(Locale.US, "  ·  NO.%02d", frameNumber));
         }
-        String capDate = formatExifCaptureDate(
-                exifSpec != null ? exifSpec.dateTimeRaw : null, dateMode);
+        String capDate = dateString(dateMode);
         if (!capDate.isEmpty()) {
             subLeft.append("  ·  ").append(capDate);
         }
@@ -996,7 +1005,7 @@ public final class PhotoSaver {
         return sb.toString();
     }
 
-    /** Formats capture timestamp for {@link CameraPrefs.PaperStyle#EXIF_FRAME}, honoring DateMode. */
+    /** Formats capture timestamp in {@code yyyy/MM/dd HH:mm} form, honoring DateMode. */
     public static String formatExifCaptureDate(String exifDateTimeRaw, CameraPrefs.DateMode dateMode) {
         if (dateMode == CameraPrefs.DateMode.OFF) return "";
         if (exifDateTimeRaw != null) {
@@ -1007,14 +1016,10 @@ public final class PhotoSaver {
                 String mm = s.substring(5, 7);
                 String dd = s.substring(8, 10);
                 String hhmm = s.substring(11, 16);
-                return yyyy + "." + mm + "." + dd + " " + hhmm;
+                return yyyy + "/" + mm + "/" + dd + " " + hhmm;
             }
         }
-        Date now = new Date();
-        if (dateMode == CameraPrefs.DateMode.RETRO_98) {
-            return "1998." + new SimpleDateFormat("MM.dd HH:mm", Locale.US).format(now);
-        }
-        return new SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.US).format(now);
+        return dateString(dateMode);
     }
 
     /** Pure-Java formatter turning raw EXIF strings into a compact analog meter line. */
@@ -1116,8 +1121,14 @@ public final class PhotoSaver {
 
     /** Copies camera EXIF metadata onto a cached master negative file in {@link NegativeVault}. */
     public static void copyCameraExifToNegative(File negFile, byte[] sourceExifJpeg) {
+        copyCameraExifToNegative(null, negFile, sourceExifJpeg, null);
+    }
+
+    /** Copies camera EXIF metadata from raw bytes or a source Uri onto a cached master negative. */
+    public static void copyCameraExifToNegative(Context context, File negFile,
+                                                byte[] sourceExifJpeg, Uri sourceExifUri) {
         if (negFile == null || !negFile.isFile()) return;
-        applyAnalogExif(null, negFile, sourceExifJpeg, null, null);
+        applyAnalogExif(context, negFile, sourceExifJpeg, sourceExifUri, null);
     }
 
     private static final String[] COPYABLE_EXIF_TAGS = {

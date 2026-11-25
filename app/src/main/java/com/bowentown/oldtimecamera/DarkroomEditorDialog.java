@@ -395,32 +395,48 @@ public final class DarkroomEditorDialog {
                         float itemSeed = (sessionSeed + i * 0.29f) % 1.0f;
                         int frameNum = ((baseFrame + i) % CameraPrefs.FRAMES_PER_ROLL) + 1;
 
-                        Bitmap filtered = glSession[0].render(cropped, effective, boostGrain,
-                                leakEnabled, blackMist, wb, false, itemSeed);
-                        if (filtered != cropped) cropped.recycle();
+                        Bitmap filtered;
+                        Bitmap negMaster = (!isRedevelop && !isBatch) ? cropped : null;
+                        try {
+                            filtered = glSession[0].render(cropped, effective, boostGrain,
+                                    leakEnabled, blackMist, wb, false, itemSeed);
+                            if (negMaster == null) {
+                                if (filtered != cropped) cropped.recycle();
+                            } else if (filtered == negMaster) {
+                                negMaster = filtered.copy(Bitmap.Config.ARGB_8888, false);
+                            }
 
-                        Bitmap print = PhotoSaver.applyPaper(activity, filtered, effective, paper,
-                                dateMode, aspect, frameNum, note, itemShortExif, itemSpec);
-                        if (print != filtered) filtered.recycle();
+                            Bitmap print = PhotoSaver.applyPaper(activity, filtered, effective, paper,
+                                    dateMode, aspect, frameNum, note, itemShortExif, itemSpec);
+                            if (print != filtered) filtered.recycle();
 
-                        String comment = PhotoSaver.buildRecipeComment(preset, boostGrain,
-                                leakEnabled, prefs.getRollNumber(), frameNum, 0, recipe,
-                                blackMist, CameraPrefs.ShootMode.SINGLE);
-                        Uri savedUri = PhotoSaver.save(activity, print, redevelopExifBytes,
-                                isRedevelop ? null : itemUri, comment);
+                            String comment = PhotoSaver.buildRecipeComment(preset, boostGrain,
+                                    leakEnabled, prefs.getRollNumber(), frameNum, 0, recipe,
+                                    blackMist, CameraPrefs.ShootMode.SINGLE);
+                            Uri savedUri = PhotoSaver.save(activity, print, redevelopExifBytes,
+                                    isRedevelop ? null : itemUri, comment);
 
-                        if (isRedevelop) {
-                            String disp = PhotoSaver.resolveDisplayName(activity, savedUri);
-                            NegativeVault.linkDerivedPrint(activity, redevelopEntry, savedUri, disp);
+                            if (isRedevelop) {
+                                String disp = PhotoSaver.resolveDisplayName(activity, savedUri);
+                                NegativeVault.linkDerivedPrint(activity, redevelopEntry, savedUri, disp);
+                            } else if (negMaster != null && !negMaster.isRecycled()) {
+                                String disp = PhotoSaver.resolveDisplayName(activity, savedUri);
+                                NegativeVault.saveNegative(activity, savedUri, disp,
+                                        negMaster, null, itemUri, aspect);
+                            }
+
+                            if (lastThumb != null && !lastThumb.isRecycled()) {
+                                lastThumb.recycle();
+                            }
+                            lastThumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
+                            print.recycle();
+                            lastSavedUri = savedUri;
+                            savedCount++;
+                        } finally {
+                            if (negMaster != null && !negMaster.isRecycled()) {
+                                negMaster.recycle();
+                            }
                         }
-
-                        if (lastThumb != null && !lastThumb.isRecycled()) {
-                            lastThumb.recycle();
-                        }
-                        lastThumb = Bitmap.createScaledBitmap(print, thumbSize, thumbSize, true);
-                        print.recycle();
-                        lastSavedUri = savedUri;
-                        savedCount++;
                     }
 
                     if (savedCount == 0 || lastSavedUri == null) {
@@ -481,7 +497,20 @@ public final class DarkroomEditorDialog {
             previewSource[0] = null;
         });
 
+        Runnable[] clockTickHolder = {null};
+        clockTickHolder[0] = () -> {
+            if (dismissed.get() || !dialog.isShowing()) return;
+            if (!saving[0] && activeDate[0] != CameraPrefs.DateMode.OFF
+                    && previewSource[0] != null && !previewSource[0].isRecycled()) {
+                renderPreview.run();
+            }
+            long delayMs = 60_000L - (System.currentTimeMillis() % 60_000L) + 150L;
+            main.postDelayed(clockTickHolder[0], delayMs);
+        };
+
         dialog.show();
+        long firstTickDelay = 60_000L - (System.currentTimeMillis() % 60_000L) + 150L;
+        main.postDelayed(clockTickHolder[0], firstTickDelay);
         busyLabel.setVisibility(View.VISIBLE);
         worker.execute(() -> {
             Bitmap raw = PhotoSaver.decodeScaledUri(activity, primaryUri, PREVIEW_EDGE);

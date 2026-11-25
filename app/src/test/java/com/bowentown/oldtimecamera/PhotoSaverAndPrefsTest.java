@@ -2,6 +2,8 @@ package com.bowentown.oldtimecamera;
 
 import org.junit.Test;
 
+import java.util.Calendar;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -272,9 +274,9 @@ public class PhotoSaverAndPrefsTest {
                 PhotoSaver.formatExifSpecLine("", "5400/1000", "2.0", "", "", "400"));
         assertEquals("35mm  ·  ISO 100",
                 PhotoSaver.formatExifSpecLine(null, null, null, null, null, "100"));
-        assertEquals("2026.11.21 22:25",
+        assertEquals("2026/11/21 22:25",
                 PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.TODAY));
-        assertEquals("1998.11.21 22:25",
+        assertEquals("1998/11/21 22:25",
                 PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.RETRO_98));
         assertEquals("",
                 PhotoSaver.formatExifCaptureDate("2026:11:21 22:25:09", CameraPrefs.DateMode.OFF));
@@ -285,5 +287,21 @@ public class PhotoSaverAndPrefsTest {
         assertTrue(extComment.contains("int=0.60"));
         assertTrue(extComment.contains("mist=on"));
         assertTrue(extComment.contains("mode=half_frame"));
+    }
+
+    @Test
+    public void dateString_formatsFullYearSlashAndDevelopingTime() {
+        Calendar cal1 = Calendar.getInstance();
+        cal1.set(2026, Calendar.NOVEMBER, 25, 22, 52, 0);
+        Date t1 = cal1.getTime();
+
+        Calendar cal2 = Calendar.getInstance();
+        cal2.set(2026, Calendar.NOVEMBER, 25, 23, 8, 0);
+        Date t2 = cal2.getTime();
+
+        assertEquals("2026/11/25 22:52", PhotoSaver.dateString(CameraPrefs.DateMode.TODAY, t1));
+        assertEquals("2026/11/25 23:08", PhotoSaver.dateString(CameraPrefs.DateMode.TODAY, t2));
+        assertEquals("1998/11/25 22:52", PhotoSaver.dateString(CameraPrefs.DateMode.RETRO_98, t1));
+        assertEquals("", PhotoSaver.dateString(CameraPrefs.DateMode.OFF, t1));
     }
 }

@@ -168,6 +168,13 @@ public final class NegativeVault {
     public static void saveNegative(Context context, Uri printUri, String printDisplayName,
                                     Bitmap cleanBitmap, byte[] sourceExifJpeg,
                                     CameraPrefs.AspectRatio aspect) {
+        saveNegative(context, printUri, printDisplayName, cleanBitmap, sourceExifJpeg, null, aspect);
+    }
+
+    /** Saves a pre-filter upright master negative, copying EXIF from either raw JPEG bytes or a Uri. */
+    public static void saveNegative(Context context, Uri printUri, String printDisplayName,
+                                    Bitmap cleanBitmap, byte[] sourceExifJpeg, Uri sourceExifUri,
+                                    CameraPrefs.AspectRatio aspect) {
         if (context == null || cleanBitmap == null || cleanBitmap.isRecycled()) return;
         String uriStr = printUri != null ? printUri.toString() : "";
         String disp = printDisplayName != null ? printDisplayName : "";
@@ -199,7 +206,7 @@ public final class NegativeVault {
                         return;
                     }
                 }
-                PhotoSaver.copyCameraExifToNegative(negFile, sourceExifJpeg);
+                PhotoSaver.copyCameraExifToNegative(context, negFile, sourceExifJpeg, sourceExifUri);
             } catch (Throwable t) {
                 //noinspection ResultOfMethodCallIgnored
                 negFile.delete();
